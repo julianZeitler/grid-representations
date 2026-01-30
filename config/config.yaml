@@ -6,16 +6,14 @@ data:
   dim: 2
   box_width: 2
   box_height: 2
+  n_shift: 15
+  sigma_shift: 3
 
 model:
   _target_: rgm.ActionableRGM
   input_size: ${data.dim}
   latent_size: 65  # D
   om_init_scale: 2
-  
-sampling:
-  N_shift: 15
-  shift_std: 3
 
 training:
   epochs: 100

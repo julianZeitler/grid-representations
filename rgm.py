@@ -13,20 +13,22 @@ class ActionableRGM(nn.Module):
     input_size: int
     latent_size: int
     batch_first: bool
-    device: str
+    device: torch.device
 
     def __init__(
         self,
         input_size: int,
         latent_size: int,
+        om_init_scale: int = 1,
         batch_first: bool = True,
-        device: str = 'cpu'
+        device: str | torch.device = 'cpu'
     ):
         super().__init__()
         self.input_size = input_size
         self.latent_size = latent_size
+        self.om_init_scale = om_init_scale
         self.batch_first = batch_first
-        self.device = device
+        self.device = torch.device(device)
         self.M = int(math.floor((latent_size - 1) / 2))
 
         # Learnable parameters
@@ -38,6 +40,11 @@ class ActionableRGM(nn.Module):
         self._scan_linear_transforms = torch.compile(self._scan_linear_transforms_impl)
 
         self.reset_parameters()
+    
+    def _apply(self, fn, *args, **kwargs):
+        super()._apply(fn, *args, **kwargs)
+        self.device = self.S.device
+        return self
 
     def reset_parameters(self, seed: int | None = None) -> None:
         """
@@ -50,7 +57,7 @@ class ActionableRGM(nn.Module):
             gen = None
         init.normal_(self.S, generator=gen)
         init.normal_(self.z0, generator=gen)
-        init.uniform_(self.om, generator=gen)
+        init.uniform_(self.om, a=0.0, b=self.om_init_scale, generator=gen)
     
     def get_T(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -183,21 +190,15 @@ class ActionableRGM(nn.Module):
         Returns:
             All intermediate states (batch, seq_len, latent_size)
         """
-        batch_size, seq_len, _, _ = T.shape
+        seq_len = T.shape[1]
 
-        # Preallocate output tensor
-        outputs = torch.zeros(batch_size, seq_len, self.latent_size,
-                             device=T.device, dtype=T.dtype)
+        outputs = []
+        z = z0
+        for t in range(seq_len):
+            z = torch.einsum('bij,bj->bi', T[:, t, :, :], z)
+            outputs.append(z)
 
-        # First step
-        outputs[:, 0] = torch.einsum('bij,bj->bi', T[:, 0, :, :], z0)
-
-        # Scan through remaining steps
-        # torch.compile will optimize this loop
-        for t in range(1, seq_len):
-            outputs[:, t] = torch.einsum('bij,bj->bi', T[:, t, :, :], outputs[:, t-1, :])
-
-        return outputs
+        return torch.stack(outputs, dim=1)
 
 
 class ElmanRGM(nn.Module):

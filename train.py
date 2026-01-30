@@ -5,16 +5,16 @@ import tempfile
 
 import hydra
 import mlflow
-import mlflow.pytorch
 from omegaconf import DictConfig, OmegaConf
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from torch.utils.data.dataloader import default_collate
 
-from data import TrajectoryDataset
+from data import TrajectoryDataset, TrajectoryGenerator, make_collate_fn
 from schedulers import ConvergenceChecker, GECO
 from losses import global_loss
+
+torch.set_float32_matmul_precision('high')
 
 
 def train_epoch(
@@ -249,24 +249,40 @@ def main(cfg: DictConfig) -> None:
                 model.reset_parameters(seed=42)
 
             if cfg.training.vary_data:
-                train_path = f"data/train/dim_{cfg.data.dim}_box_{cfg.data.box_width}x{cfg.data.box_height}_seq_len_{cfg.data.seq_len}_k_{k}"
+                train_path = f"data/train/dim_{cfg.data.dim}_box_{cfg.data.box_width}x{cfg.data.box_height}_seq_len_{cfg.data.seq_len}_n_shift_{cfg.data.n_shift}_sigma_shift_{cfg.data.sigma_shift}_k_{k}"
             else:
-                train_path = f"data/train/dim_{cfg.data.dim}_box_{cfg.data.box_width}x{cfg.data.box_height}_seq_len_{cfg.data.seq_len}"
+                train_path = f"data/train/dim_{cfg.data.dim}_box_{cfg.data.box_width}x{cfg.data.box_height}_seq_len_{cfg.data.seq_len}_n_shift_{cfg.data.n_shift}_sigma_shift_{cfg.data.sigma_shift}_k_0"
             if not os.path.exists(train_path):
-                print(f"Generating dataset...")
-                # TODO implement generator
-            
-            val_path = f"data/val/dim_{cfg.data.dim}_box_{cfg.data.box_width}x{cfg.data.box_height}_seq_len_{cfg.data.seq_len}"
+                generator = TrajectoryGenerator()
+                generator.generate_dataset(
+                    train_path,
+                    num_sequences=100000,
+                    sequence_length=cfg.data.seq_len,
+                    box_width=cfg.data.box_width,
+                    box_height=cfg.data.box_height,
+                    n_shift=cfg.data.n_shift,
+                    sigma_shift=cfg.data.sigma_shift,
+                )
+
+            val_path = f"data/val/dim_{cfg.data.dim}_box_{cfg.data.box_width}x{cfg.data.box_height}_seq_len_{cfg.data.seq_len}_n_shift_{cfg.data.n_shift}_sigma_shift_{cfg.data.sigma_shift}"
             if not os.path.exists(val_path):
-                print(f"Generating validation dataset...")
-                # TODO implement generator
+                generator = TrajectoryGenerator()
+                generator.generate_dataset(
+                    val_path,
+                    num_sequences=10000,
+                    sequence_length=cfg.data.seq_len,
+                    box_width=cfg.data.box_width,
+                    box_height=cfg.data.box_height,
+                    n_shift=cfg.data.n_shift,
+                    sigma_shift=cfg.data.sigma_shift,
+                )
 
             train_dataset = TrajectoryDataset(train_path)
             train_loader = DataLoader(train_dataset, batch_size=cfg.training.batch_size, shuffle=False,
-                                      collate_fn=lambda x: tuple(x_.to(device) for x_ in default_collate(x)))
+                                      collate_fn=make_collate_fn(device))
             val_dataset = TrajectoryDataset(val_path)
             val_loader = DataLoader(val_dataset, batch_size=cfg.training.batch_size, shuffle=True,
-                                      collate_fn=lambda x: tuple(x_.to(device) for x_ in default_collate(x)))
+                                      collate_fn=make_collate_fn(device))
 
             history = train(
                 model,
@@ -282,7 +298,9 @@ def main(cfg: DictConfig) -> None:
                 k=k,
             )
 
-            mlflow.pytorch.log_model(model, f"{k}/model")
+            state_dict_path = os.path.join(tempfile.gettempdir(), f"model_k{k}_state_dict.pt")
+            torch.save(model.state_dict(), state_dict_path)
+            mlflow.log_artifact(state_dict_path, artifact_path="models")
 
 
 if __name__ == "__main__":

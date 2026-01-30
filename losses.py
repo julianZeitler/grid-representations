@@ -125,7 +125,7 @@ def global_loss(
         Tuple of (total_loss, components_dict).
     """
     target_chi = chi(x, cfg.sigma_theta, cfg.f, causal=True)
-    loss_sep = cfg.loss.sep_scale * separation(z, target_chi, cfg.sigma_sq, causal=True, decay=cfg.get("decay"))
+    loss_sep = cfg.sep_scale * separation(z, target_chi, cfg.sigma_sq, causal=True, decay=cfg.get("decay"))
     loss_pos = positivity(z)
     loss_norm = norm(z, z_shift)
 

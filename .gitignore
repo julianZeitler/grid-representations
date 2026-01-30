@@ -11,3 +11,6 @@ wheels/
 
 uv.lock
 mlruns/
+
+data/
+outputs/
