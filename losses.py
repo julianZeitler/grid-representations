@@ -1,4 +1,7 @@
 import torch
+from omegaconf import DictConfig
+
+from schedulers import GECO
 
 def reconstruction(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
     """Mean squared error reconstruction loss.
@@ -99,3 +102,46 @@ def chi(x: torch.Tensor, sigma_theta: float, f: float, causal: bool = True) -> t
         dist = torch.tril(dist)
 
     return 1 - f * torch.exp(-dist / (2 * sigma_theta ** 2))
+
+def global_loss(
+    z: torch.Tensor,
+    z_shift: torch.Tensor,
+    x: torch.Tensor,
+    geco_pos: GECO,
+    geco_norm: GECO,
+    cfg: DictConfig,
+) -> tuple[torch.Tensor, dict[str, float]]:
+    """Compute combined loss with GECO-weighted regularization.
+
+    Args:
+        z: Latent states of shape (batch, seq_len, latent_size).
+        z_shift: Shifted latent states for norm loss, or None to skip.
+        x: Position tensor of shape (batch, seq_len, dim).
+        geco_pos: GECO instance for positivity regularization.
+        geco_norm: GECO instance for norm regularization.
+        cfg: Loss config with sigma_sq, sigma_theta, f, decay.
+
+    Returns:
+        Tuple of (total_loss, components_dict).
+    """
+    target_chi = chi(x, cfg.sigma_theta, cfg.f, causal=True)
+    loss_sep = cfg.loss.sep_scale * separation(z, target_chi, cfg.sigma_sq, causal=True, decay=cfg.get("decay"))
+    
+    loss_pos = positivity(z)
+    lambda_pos = geco_pos.step(loss_pos.item())
+
+    loss_norm = norm(z, z_shift)
+    lambda_norm = geco_norm.step(loss_norm.item())
+
+    # Total loss
+    total = loss_sep + lambda_pos * loss_pos + lambda_norm * loss_norm
+
+    components = {
+        "separation": loss_sep.item(),
+        "positivity": loss_pos.item(),
+        "norm": loss_norm.item(),
+        "lambda_pos": lambda_pos,
+        "lambda_norm": lambda_norm,
+    }
+
+    return total, components
