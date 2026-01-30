@@ -77,3 +77,25 @@ def norm(z: torch.Tensor, z_shift: torch.Tensor) -> torch.Tensor:
 
     norms_out = z_normalized.pow(2).reshape(B, N_shift, L, D).sum(dim=(0, 2))  # (N_shift, D)
     return (norms_out - 1).norm() / (N_shift * D)
+
+def chi(x: torch.Tensor, sigma_theta: float, f: float, causal: bool = True) -> torch.Tensor:
+    """Compute target similarity matrix from positions.
+
+    Args:
+        x: Position tensor of shape (seq_len, dim) or (batch, seq_len, dim).
+        sigma_theta: Bandwidth for kernel.
+        f: Scaling factor for similarity.
+        causal: If True, mask future timesteps with lower triangular.
+
+    Returns:
+        Chi matrix of shape (seq_len, seq_len) or (batch, seq_len, seq_len).
+    """
+    if x.ndim == 2:
+        dist = torch.sum((x[:, None, :] - x[None, :, :]) ** 2, dim=2)
+    else:
+        dist = torch.sum((x[:, :, None, :] - x[:, None, :, :]) ** 2, dim=3)
+
+    if causal:
+        dist = torch.tril(dist)
+
+    return 1 - f * torch.exp(-dist / (2 * sigma_theta ** 2))
