@@ -1,0 +1,58 @@
+defaults:
+  - _self_
+
+data:
+  seq_len: 150
+  batch_size: 10
+  dim: 2
+
+model:
+  _target_: rgm.ActionableRGM
+  input_size: ${data.dim}
+  latent_size: 65  # D
+  om_init_scale: 2
+  
+sampling:
+  N_shift: 15
+  shift_std: 3
+
+training:
+  iterations: 5000  # T
+  K: 5
+  resample_iters: 5
+  save_iters: 1 # Save results
+  checkpoint_iters: 200
+  print_iters: 1000
+
+loss:
+  sigma_sq: 0.04
+  sigma_theta: 0.5
+  f: 1
+  sep_scale: 100
+  causal: false
+  decay: null
+
+regularization:
+  positivity:
+    lambda_init: 0.1
+    k: -9
+    alpha: 0.9
+    gamma: 0.001
+  norm:
+    lambda_init: 0.005
+    k: -2
+    alpha: 0.9
+    gamma: 0.001
+
+optimizer:
+  _target_: torch.optim.Adam
+  lr: 1e-1
+  betas: [0.9, 0.9]
+  eps: 1e-8  # eta - numerical stability
+
+convergence:
+  enabled: false
+  window: 1000
+  patience: 100
+  threshold: 0.1
+  smoothing: 20
