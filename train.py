@@ -10,16 +10,23 @@ from omegaconf import DictConfig, OmegaConf
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
+from torch.utils.data.dataloader import default_collate
 
-from schedulers import ConvergenceChecker
+from data import TrajectoryDataset
+from schedulers import ConvergenceChecker, GECO
+from losses import global_loss
 
 
 def train_epoch(
     model: nn.Module,
-    train_loader: DataLoader,
+    data_loader: DataLoader,
     loss_fn,
+    loss_cfg: DictConfig,
     optimizer: torch.optim.Optimizer,
-    device: torch.device,
+    geco_pos: GECO,
+    geco_norm: GECO,
+    iterations: int,
+    epoch: int = 0
 ) -> tuple[float, dict[str, float]]:
     """Train for one epoch.
 
@@ -38,30 +45,44 @@ def train_epoch(
     total_loss = 0.0
     component_sums: dict[str, float] = {}
 
-    for batch in train_loader:
-        batch = {k: v.to(device) for k, v in batch.items()}
+    for _ in range(epoch*iterations, (epoch+1)*iterations):
+        batch, shift_batch = next(iter(data_loader))
 
         optimizer.zero_grad()
-        output = model(batch)
-        loss, components = loss_fn(output, batch)
+        z, _ = model(batch)
+        z_shift, _ = model(shift_batch)
+        loss, components = loss_fn(
+            z,
+            z_shift,
+            batch,
+            geco_pos.lambda_val,
+            geco_norm.lambda_val,
+            loss_cfg
+        )
         loss.backward()
         optimizer.step()
+
+        geco_pos.step(components["positivity"])
+        geco_norm.step(components["norm"])
 
         total_loss += loss.item()
         for k, v in components.items():
             component_sums[k] = component_sums.get(k, 0.0) + v
 
-    n = len(train_loader)
-    avg_components = {k: v / n for k, v in component_sums.items()}
-    return total_loss / n, avg_components
+    avg_components = {k: v / iterations for k, v in component_sums.items()}
+    return total_loss / iterations, avg_components
 
 
 @torch.no_grad()
 def evaluate(
     model: nn.Module,
-    val_loader: DataLoader,
+    data_loader: DataLoader,
     loss_fn,
-    device: torch.device,
+    loss_cfg: DictConfig,
+    geco_pos: GECO,
+    geco_norm: GECO,
+    iterations: int,
+    epoch: int = 0
 ) -> tuple[float, dict[str, float]]:
     """Evaluate model on validation set.
 
@@ -79,17 +100,26 @@ def evaluate(
     total_loss = 0.0
     component_sums: dict[str, float] = {}
 
-    for batch in val_loader:
-        batch = {k: v.to(device) for k, v in batch.items()}
-        output = model(batch)
-        loss, components = loss_fn(output, batch)
+    for _ in range(epoch*iterations, (epoch+1)*iterations):
+        batch, shift_batch = next(iter(data_loader))
+
+        z, _ = model(batch)
+        z_shift, _ = model(shift_batch)
+        loss, components = loss_fn(
+            z,
+            z_shift,
+            batch,
+            geco_pos.lambda_val,
+            geco_norm.lambda_val,
+            loss_cfg
+        )
+
         total_loss += loss.item()
         for k, v in components.items():
             component_sums[k] = component_sums.get(k, 0.0) + v
 
-    n = len(val_loader)
-    avg_components = {k: v / n for k, v in component_sums.items()}
-    return total_loss / n, avg_components
+    avg_components = {k: v / iterations for k, v in component_sums.items()}
+    return total_loss / iterations, avg_components
 
 
 def train(
@@ -97,11 +127,13 @@ def train(
     train_loader: DataLoader,
     val_loader: DataLoader,
     loss_fn,
+    geco_pos: GECO,
+    geco_norm: GECO,
     optimizer: torch.optim.Optimizer,
-    device: torch.device,
-    epochs: int,
-    checkpoint_interval: int = 0,
+    train_cfg: DictConfig,
+    loss_cfg: DictConfig,
     convergence_cfg: DictConfig | None = None,
+    k: int = 0,
 ) -> dict:
     """Full training loop.
 
@@ -133,33 +165,55 @@ def train(
         )
 
     with tempfile.TemporaryDirectory() as tmpdir:
-        for epoch in range(1, epochs + 1):
-            train_loss, loss_components = train_epoch(model, train_loader, loss_fn, optimizer, device)
-            val_loss, _ = evaluate(model, val_loader, loss_fn, device)
+        for epoch in range(1, train_cfg.epochs + 1):
+            train_loss, loss_components = train_epoch(
+                model,
+                train_loader,
+                loss_fn,
+                loss_cfg,
+                optimizer,
+                geco_pos,
+                geco_norm,
+                train_cfg.train_iterations,
+                epoch
+            )
+
+            val_loss, _ = evaluate(
+                model,
+                val_loader,
+                loss_fn,
+                loss_cfg,
+                geco_pos,
+                geco_norm,
+                train_cfg.val_iterations,
+                epoch
+            )
 
             history["train_loss"].append(train_loss)
             history["val_loss"].append(val_loss)
 
-            mlflow.log_metrics({"train_loss": train_loss, "val_loss": val_loss, **loss_components}, step=epoch)
-            print(f"Epoch {epoch}: train_loss={train_loss:.4f}, val_loss={val_loss:.4f}")
+            metrics = {f"k{k}/train_loss": train_loss, f"k{k}/val_loss": val_loss}
+            metrics.update({f"k{k}/{name}": val for name, val in loss_components.items()})
+            mlflow.log_metrics(metrics, step=epoch)
+            print(f"[k={k}] Epoch {epoch}: train_loss={train_loss:.4f}, val_loss={val_loss:.4f}")
 
             # Convergence check
             if checker is not None:
                 if checker.step(**loss_components):
-                    print(f"Converged at epoch {epoch}")
-                    print(f"Final smoothed: {checker.current_smoothed}")
+                    print(f"[k={k}] Converged at epoch {epoch}")
+                    print(f"[k={k}] Final smoothed: {checker.current_smoothed}")
                     break
 
-            if checkpoint_interval > 0 and epoch % checkpoint_interval == 0:
-                checkpoint_path = os.path.join(tmpdir, f"checkpoint_epoch_{epoch}.pt")
-                torch.save({
-                    "epoch": epoch,
-                    "model_state_dict": model.state_dict(),
-                    "optimizer_state_dict": optimizer.state_dict(),
-                    "train_loss": train_loss,
-                    "val_loss": val_loss,
-                }, checkpoint_path)
-                mlflow.log_artifact(checkpoint_path, artifact_path="checkpoints")
+            checkpoint_path = os.path.join(tmpdir, f"checkpoint_k_{k}_epoch_{epoch}.pt")
+            torch.save({
+                "k": k,
+                "epoch": epoch,
+                "model_state_dict": model.state_dict(),
+                "optimizer_state_dict": optimizer.state_dict(),
+                "train_loss": train_loss,
+                "val_loss": val_loss,
+            }, checkpoint_path)
+            mlflow.log_artifact(checkpoint_path, artifact_path=f"checkpoints/k{k}")
 
     return history
 
@@ -181,17 +235,54 @@ def main(cfg: DictConfig) -> None:
 
         # Instantiate optimizer (pass params explicitly since not in config)
         optimizer = hydra.utils.instantiate(cfg.optimizer, params=model.parameters())
+        geco_pos = hydra.utils.instantiate(cfg.regularization.positivity)
+        geco_norm = hydra.utils.instantiate(cfg.regularization.norm)
 
-        # TODO: Create DataLoaders and loss_fn (returning (loss, components_dict)), then call:
-        # history = train(
-        #     model, train_loader, val_loader, loss_fn, optimizer, device,
-        #     epochs=cfg.training.iterations,
-        #     checkpoint_interval=cfg.training.checkpoint_iters,
-        #     convergence_cfg=cfg.convergence,
-        # )
+        for k in range(cfg.training.K):
+            optimizer.state.clear()
+            geco_pos.reset(cfg.regularization.positivity.lambda_init)
+            geco_norm.reset(cfg.regularization.norm.lambda_init)
+            
+            if cfg.training.vary_seed:
+                model.reset_parameters(seed=k)
+            else:
+                model.reset_parameters(seed=42)
 
-        # Log model
-        mlflow.pytorch.log_model(model, "model")
+            if cfg.training.vary_data:
+                train_path = f"data/train/dim_{cfg.data.dim}_box_{cfg.data.box_width}x{cfg.data.box_height}_seq_len_{cfg.data.seq_len}_k_{k}"
+            else:
+                train_path = f"data/train/dim_{cfg.data.dim}_box_{cfg.data.box_width}x{cfg.data.box_height}_seq_len_{cfg.data.seq_len}"
+            if not os.path.exists(train_path):
+                print(f"Generating dataset...")
+                # TODO implement generator
+            
+            val_path = f"data/val/dim_{cfg.data.dim}_box_{cfg.data.box_width}x{cfg.data.box_height}_seq_len_{cfg.data.seq_len}"
+            if not os.path.exists(val_path):
+                print(f"Generating validation dataset...")
+                # TODO implement generator
+
+            train_dataset = TrajectoryDataset(train_path)
+            train_loader = DataLoader(train_dataset, batch_size=cfg.training.batch_size, shuffle=False,
+                                      collate_fn=lambda x: tuple(x_.to(device) for x_ in default_collate(x)))
+            val_dataset = TrajectoryDataset(val_path)
+            val_loader = DataLoader(val_dataset, batch_size=cfg.training.batch_size, shuffle=True,
+                                      collate_fn=lambda x: tuple(x_.to(device) for x_ in default_collate(x)))
+
+            history = train(
+                model,
+                train_loader,
+                val_loader,
+                global_loss,
+                geco_pos,
+                geco_norm,
+                optimizer,
+                cfg.training,
+                cfg.loss,
+                convergence_cfg=cfg.convergence,
+                k=k,
+            )
+
+            mlflow.pytorch.log_model(model, f"{k}/model")
 
 
 if __name__ == "__main__":

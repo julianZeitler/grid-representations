@@ -107,8 +107,8 @@ def global_loss(
     z: torch.Tensor,
     z_shift: torch.Tensor,
     x: torch.Tensor,
-    geco_pos: GECO,
-    geco_norm: GECO,
+    lambda_pos: float,
+    lambda_norm: float,
     cfg: DictConfig,
 ) -> tuple[torch.Tensor, dict[str, float]]:
     """Compute combined loss with GECO-weighted regularization.
@@ -126,12 +126,8 @@ def global_loss(
     """
     target_chi = chi(x, cfg.sigma_theta, cfg.f, causal=True)
     loss_sep = cfg.loss.sep_scale * separation(z, target_chi, cfg.sigma_sq, causal=True, decay=cfg.get("decay"))
-    
     loss_pos = positivity(z)
-    lambda_pos = geco_pos.step(loss_pos.item())
-
     loss_norm = norm(z, z_shift)
-    lambda_norm = geco_norm.step(loss_norm.item())
 
     # Total loss
     total = loss_sep + lambda_pos * loss_pos + lambda_norm * loss_norm
@@ -139,9 +135,7 @@ def global_loss(
     components = {
         "separation": loss_sep.item(),
         "positivity": loss_pos.item(),
-        "norm": loss_norm.item(),
-        "lambda_pos": lambda_pos,
-        "lambda_norm": lambda_norm,
+        "norm": loss_norm.item()
     }
 
     return total, components

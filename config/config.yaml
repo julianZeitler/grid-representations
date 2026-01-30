@@ -3,8 +3,9 @@ defaults:
 
 data:
   seq_len: 150
-  batch_size: 10
   dim: 2
+  box_width: 2
+  box_height: 2
 
 model:
   _target_: rgm.ActionableRGM
@@ -17,12 +18,13 @@ sampling:
   shift_std: 3
 
 training:
-  iterations: 5000  # T
+  epochs: 100
+  train_iterations: 50
+  val_iterations: 10
   K: 5
-  resample_iters: 5
-  save_iters: 1 # Save results
-  checkpoint_iters: 200
-  print_iters: 1000
+  batch_size: 10
+  vary_seed: true
+  vary_data: false
 
 loss:
   sigma_sq: 0.04
@@ -34,11 +36,13 @@ loss:
 
 regularization:
   positivity:
+    _target_: schedulers.GECO
     lambda_init: 0.1
     k: -9
     alpha: 0.9
     gamma: 0.001
   norm:
+    _target_: schedulers.GECO
     lambda_init: 0.005
     k: -2
     alpha: 0.9

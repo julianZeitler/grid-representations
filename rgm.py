@@ -30,22 +30,27 @@ class ActionableRGM(nn.Module):
         self.M = int(math.floor((latent_size - 1) / 2))
 
         # Learnable parameters
-        self.z0 = nn.Parameter(torch.empty(latent_size))
-        self.om = nn.Parameter(torch.empty((self.M, 2)))
-        self.S = nn.Parameter(torch.empty((2*self.M+1, 2*self.M+1)))
+        self.z0 = nn.Parameter(torch.empty(latent_size, device=self.device))
+        self.om = nn.Parameter(torch.empty((self.M, 2), device=self.device))
+        self.S = nn.Parameter(torch.empty((2*self.M+1, 2*self.M+1), device=self.device))
 
         # Compile the scan function for better performance
         self._scan_linear_transforms = torch.compile(self._scan_linear_transforms_impl)
 
         self.reset_parameters()
 
-    def reset_parameters(self) -> None:
+    def reset_parameters(self, seed: int | None = None) -> None:
         """
         Resets parameters based on their initialization used in ``__init__``.
         """
-        init.normal_(self.S)
-        init.normal_(self.z0)
-        init.uniform_(self.om)
+        if seed:
+            gen = torch.Generator(device=self.device)
+            gen.manual_seed(seed)
+        else:
+            gen = None
+        init.normal_(self.S, generator=gen)
+        init.normal_(self.z0, generator=gen)
+        init.uniform_(self.om, generator=gen)
     
     def get_T(self, x: torch.Tensor) -> torch.Tensor:
         """
