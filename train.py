@@ -12,7 +12,6 @@ from torch.utils.data import DataLoader
 
 from data import TrajectoryDataset, TrajectoryGenerator, make_collate_fn
 from schedulers import ConvergenceChecker, GECO
-from losses import global_loss
 
 torch.set_float32_matmul_precision('high')
 
@@ -237,6 +236,7 @@ def main(cfg: DictConfig) -> None:
         optimizer = hydra.utils.instantiate(cfg.optimizer, params=model.parameters())
         geco_pos = hydra.utils.instantiate(cfg.regularization.positivity)
         geco_norm = hydra.utils.instantiate(cfg.regularization.norm)
+        loss_fn = hydra.utils.get_method(cfg.loss._target_)
 
         for k in range(cfg.training.K):
             optimizer.state.clear()
@@ -288,7 +288,7 @@ def main(cfg: DictConfig) -> None:
                 model,
                 train_loader,
                 val_loader,
-                global_loss,
+                loss_fn,
                 geco_pos,
                 geco_norm,
                 optimizer,

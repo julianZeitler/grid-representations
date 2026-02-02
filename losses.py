@@ -103,7 +103,7 @@ def chi(x: torch.Tensor, sigma_theta: float, f: float, causal: bool = True) -> t
 
     return 1 - f * torch.exp(-dist / (2 * sigma_theta ** 2))
 
-def global_loss(
+def total_sep_loss(
     z: torch.Tensor,
     z_shift: torch.Tensor,
     x: torch.Tensor,

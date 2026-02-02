@@ -25,6 +25,7 @@ training:
   vary_data: false
 
 loss:
+  _target_: losses.total_sep_loss
   sigma_sq: 0.04
   sigma_theta: 0.5
   f: 1
