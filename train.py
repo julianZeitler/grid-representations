@@ -121,186 +121,132 @@ def evaluate(
     return total_loss / iterations, avg_components
 
 
-def train(
-    model: nn.Module,
-    train_loader: DataLoader,
-    val_loader: DataLoader,
-    loss_fn,
-    geco_pos: GECO,
-    geco_norm: GECO,
-    optimizer: torch.optim.Optimizer,
-    train_cfg: DictConfig,
-    loss_cfg: DictConfig,
-    convergence_cfg: DictConfig | None = None,
-    k: int = 0,
-) -> dict:
-    """Full training loop.
+def train(cfg: DictConfig) -> None:
+    """Run training with the given config. Assumes MLflow run is already active."""
+    mlflow.log_dict(OmegaConf.to_container(cfg, resolve=True), "config.yaml")
 
-    Args:
-        model: Model to train.
-        train_loader: Training data loader.
-        val_loader: Validation data loader.
-        loss_fn: Loss function returning (total_loss, loss_dict) where loss_dict
-            contains individual loss components for convergence checking.
-        optimizer: Optimizer.
-        device: Device to train on.
-        epochs: Number of epochs.
-        checkpoint_interval: Save checkpoint every N epochs (0 to disable).
-        convergence_cfg: Convergence config with enabled, window, patience, threshold, smoothing.
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    Returns:
-        Dictionary with training history.
-    """
-    history = {"train_loss": [], "val_loss": []}
+    model = hydra.utils.instantiate(cfg.model).to(device)
+    optimizer = hydra.utils.instantiate(cfg.optimizer, params=model.parameters())
+    geco_pos = hydra.utils.instantiate(cfg.regularization.positivity)
+    geco_norm = hydra.utils.instantiate(cfg.regularization.norm)
+    loss_fn = hydra.utils.get_method(cfg.loss._target_)
 
-    # Setup convergence checker
     checker = None
-    if convergence_cfg is not None and convergence_cfg.enabled:
+    if cfg.convergence is not None and cfg.convergence.enabled:
         checker = ConvergenceChecker(
-            window=convergence_cfg.window,
-            patience=convergence_cfg.patience,
-            threshold=convergence_cfg.threshold,
-            smoothing=convergence_cfg.smoothing,
+            window=cfg.convergence.window,
+            patience=cfg.convergence.patience,
+            threshold=cfg.convergence.threshold,
+            smoothing=cfg.convergence.smoothing,
         )
 
-    with tempfile.TemporaryDirectory() as tmpdir:
-        for epoch in range(1, train_cfg.epochs + 1):
-            train_loss, loss_components = train_epoch(
-                model,
-                train_loader,
-                loss_fn,
-                loss_cfg,
-                optimizer,
-                geco_pos,
-                geco_norm,
-                train_cfg.train_iterations,
-                epoch
+    for k in range(cfg.training.K):
+        optimizer.state.clear()
+        geco_pos.reset(cfg.regularization.positivity.lambda_init)
+        geco_norm.reset(cfg.regularization.norm.lambda_init)
+
+        if cfg.training.vary_seed:
+            model.reset_parameters(seed=k)
+        else:
+            model.reset_parameters(seed=42)
+
+        if cfg.training.vary_data:
+            train_path = f"data/train/dim_{cfg.data.dim}_box_{cfg.data.box_width}x{cfg.data.box_height}_seq_len_{cfg.data.seq_len}_n_shift_{cfg.data.n_shift}_sigma_shift_{cfg.data.sigma_shift}_k_{k}"
+        else:
+            train_path = f"data/train/dim_{cfg.data.dim}_box_{cfg.data.box_width}x{cfg.data.box_height}_seq_len_{cfg.data.seq_len}_n_shift_{cfg.data.n_shift}_sigma_shift_{cfg.data.sigma_shift}_k_0"
+        if not os.path.exists(train_path):
+            generator = TrajectoryGenerator()
+            generator.generate_dataset(
+                train_path,
+                num_sequences=100000,
+                sequence_length=cfg.data.seq_len,
+                box_width=cfg.data.box_width,
+                box_height=cfg.data.box_height,
+                n_shift=cfg.data.n_shift,
+                sigma_shift=cfg.data.sigma_shift,
             )
 
-            val_loss, _ = evaluate(
-                model,
-                val_loader,
-                loss_fn,
-                loss_cfg,
-                geco_pos,
-                geco_norm,
-                train_cfg.val_iterations,
-                epoch
+        val_path = f"data/val/dim_{cfg.data.dim}_box_{cfg.data.box_width}x{cfg.data.box_height}_seq_len_{cfg.data.seq_len}_n_shift_{cfg.data.n_shift}_sigma_shift_{cfg.data.sigma_shift}"
+        if not os.path.exists(val_path):
+            generator = TrajectoryGenerator()
+            generator.generate_dataset(
+                val_path,
+                num_sequences=10000,
+                sequence_length=cfg.data.seq_len,
+                box_width=cfg.data.box_width,
+                box_height=cfg.data.box_height,
+                n_shift=cfg.data.n_shift,
+                sigma_shift=cfg.data.sigma_shift,
             )
 
-            history["train_loss"].append(train_loss)
-            history["val_loss"].append(val_loss)
+        train_dataset = TrajectoryDataset(train_path)
+        train_loader = DataLoader(train_dataset, batch_size=cfg.training.batch_size, shuffle=False,
+                                  collate_fn=make_collate_fn(device))
+        val_dataset = TrajectoryDataset(val_path)
+        val_loader = DataLoader(val_dataset, batch_size=cfg.training.batch_size, shuffle=True,
+                                  collate_fn=make_collate_fn(device))
 
-            metrics = {f"k{k}/train_loss": train_loss, f"k{k}/val_loss": val_loss}
-            metrics.update({f"k{k}/{name}": val for name, val in loss_components.items()})
-            mlflow.log_metrics(metrics, step=epoch)
-            print(f"[k={k}] Epoch {epoch}: train_loss={train_loss:.4f}, val_loss={val_loss:.4f}")
+        with tempfile.TemporaryDirectory() as tmpdir:
+            for epoch in range(1, cfg.training.epochs + 1):
+                train_loss, loss_components = train_epoch(
+                    model,
+                    train_loader,
+                    loss_fn,
+                    cfg.loss,
+                    optimizer,
+                    geco_pos,
+                    geco_norm,
+                    cfg.training.train_iterations,
+                    epoch
+                )
 
-            # Convergence check
-            if checker is not None:
-                if checker.step(**loss_components):
-                    print(f"[k={k}] Converged at epoch {epoch}")
-                    print(f"[k={k}] Final smoothed: {checker.current_smoothed}")
-                    break
+                val_loss, _ = evaluate(
+                    model,
+                    val_loader,
+                    loss_fn,
+                    cfg.loss,
+                    geco_pos,
+                    geco_norm,
+                    cfg.training.val_iterations,
+                    epoch
+                )
 
-            checkpoint_path = os.path.join(tmpdir, f"checkpoint_k_{k}_epoch_{epoch}.pt")
-            torch.save({
-                "k": k,
-                "epoch": epoch,
-                "model_state_dict": model.state_dict(),
-                "optimizer_state_dict": optimizer.state_dict(),
-                "train_loss": train_loss,
-                "val_loss": val_loss,
-            }, checkpoint_path)
-            mlflow.log_artifact(checkpoint_path, artifact_path=f"checkpoints/k{k}")
+                metrics = {f"k{k}/train_loss": train_loss, f"k{k}/val_loss": val_loss}
+                metrics.update({f"k{k}/{name}": val for name, val in loss_components.items()})
+                mlflow.log_metrics(metrics, step=epoch)
+                print(f"[k={k}] Epoch {epoch}: train_loss={train_loss:.4f}, val_loss={val_loss:.4f}")
 
-    return history
+                if checker is not None:
+                    if checker.step(**loss_components):
+                        print(f"[k={k}] Converged at epoch {epoch}")
+                        print(f"[k={k}] Final smoothed: {checker.current_smoothed}")
+                        break
+
+                checkpoint_path = os.path.join(tmpdir, f"checkpoint_k_{k}_epoch_{epoch}.pt")
+                torch.save({
+                    "k": k,
+                    "epoch": epoch,
+                    "model_state_dict": model.state_dict(),
+                    "optimizer_state_dict": optimizer.state_dict(),
+                    "train_loss": train_loss,
+                    "val_loss": val_loss,
+                }, checkpoint_path)
+                mlflow.log_artifact(checkpoint_path, artifact_path=f"checkpoints/k{k}")
+
+        state_dict_path = os.path.join(tempfile.gettempdir(), f"model_k{k}_state_dict.pt")
+        torch.save(model.state_dict(), state_dict_path)
+        mlflow.log_artifact(state_dict_path, artifact_path="models")
 
 
 @hydra.main(version_base=None, config_path="config", config_name="config")
 def main(cfg: DictConfig) -> None:
-    # Set MLflow tracking to local directory
     mlflow.set_tracking_uri("file:./mlruns")
     mlflow.set_experiment("grid-representations")
 
     with mlflow.start_run():
-        # Log full config as YAML artifact (preserves hierarchy)
-        mlflow.log_dict(OmegaConf.to_container(cfg, resolve=True), "config.yaml")
-
-        device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-        # Instantiate model from config
-        model = hydra.utils.instantiate(cfg.model).to(device)
-
-        # Instantiate optimizer (pass params explicitly since not in config)
-        optimizer = hydra.utils.instantiate(cfg.optimizer, params=model.parameters())
-        geco_pos = hydra.utils.instantiate(cfg.regularization.positivity)
-        geco_norm = hydra.utils.instantiate(cfg.regularization.norm)
-        loss_fn = hydra.utils.get_method(cfg.loss._target_)
-
-        for k in range(cfg.training.K):
-            optimizer.state.clear()
-            geco_pos.reset(cfg.regularization.positivity.lambda_init)
-            geco_norm.reset(cfg.regularization.norm.lambda_init)
-            
-            if cfg.training.vary_seed:
-                model.reset_parameters(seed=k)
-            else:
-                model.reset_parameters(seed=42)
-
-            if cfg.training.vary_data:
-                train_path = f"data/train/dim_{cfg.data.dim}_box_{cfg.data.box_width}x{cfg.data.box_height}_seq_len_{cfg.data.seq_len}_n_shift_{cfg.data.n_shift}_sigma_shift_{cfg.data.sigma_shift}_k_{k}"
-            else:
-                train_path = f"data/train/dim_{cfg.data.dim}_box_{cfg.data.box_width}x{cfg.data.box_height}_seq_len_{cfg.data.seq_len}_n_shift_{cfg.data.n_shift}_sigma_shift_{cfg.data.sigma_shift}_k_0"
-            if not os.path.exists(train_path):
-                generator = TrajectoryGenerator()
-                generator.generate_dataset(
-                    train_path,
-                    num_sequences=100000,
-                    sequence_length=cfg.data.seq_len,
-                    box_width=cfg.data.box_width,
-                    box_height=cfg.data.box_height,
-                    n_shift=cfg.data.n_shift,
-                    sigma_shift=cfg.data.sigma_shift,
-                )
-
-            val_path = f"data/val/dim_{cfg.data.dim}_box_{cfg.data.box_width}x{cfg.data.box_height}_seq_len_{cfg.data.seq_len}_n_shift_{cfg.data.n_shift}_sigma_shift_{cfg.data.sigma_shift}"
-            if not os.path.exists(val_path):
-                generator = TrajectoryGenerator()
-                generator.generate_dataset(
-                    val_path,
-                    num_sequences=10000,
-                    sequence_length=cfg.data.seq_len,
-                    box_width=cfg.data.box_width,
-                    box_height=cfg.data.box_height,
-                    n_shift=cfg.data.n_shift,
-                    sigma_shift=cfg.data.sigma_shift,
-                )
-
-            train_dataset = TrajectoryDataset(train_path)
-            train_loader = DataLoader(train_dataset, batch_size=cfg.training.batch_size, shuffle=False,
-                                      collate_fn=make_collate_fn(device))
-            val_dataset = TrajectoryDataset(val_path)
-            val_loader = DataLoader(val_dataset, batch_size=cfg.training.batch_size, shuffle=True,
-                                      collate_fn=make_collate_fn(device))
-
-            history = train(
-                model,
-                train_loader,
-                val_loader,
-                loss_fn,
-                geco_pos,
-                geco_norm,
-                optimizer,
-                cfg.training,
-                cfg.loss,
-                convergence_cfg=cfg.convergence,
-                k=k,
-            )
-
-            state_dict_path = os.path.join(tempfile.gettempdir(), f"model_k{k}_state_dict.pt")
-            torch.save(model.state_dict(), state_dict_path)
-            mlflow.log_artifact(state_dict_path, artifact_path="models")
+        train(cfg)
 
 
 if __name__ == "__main__":
