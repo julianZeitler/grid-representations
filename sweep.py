@@ -13,6 +13,8 @@ mlflow.set_experiment("grid-representations")
 config_dir = os.path.abspath("config")
 
 EXPERIMENT_NAME = "seq_len_sweep"
+experiments = None
+param_grid = None
 
 # Define experiments (optional, use None or [] to skip)
 experiments = [
@@ -27,10 +29,9 @@ experiments = [
 ]
 
 # Define parameter grid for outer product sweeps (optional)
-param_grid = {
-    # "model.latent_size": [32, 64, 128],
-    # "optimizer.lr": [0.01, 0.1],
-}
+# param_grid = {
+#     "regularization.norm.k": [-4, -2, -1, 1, 2],
+# }
 
 
 def make_overrides(experiment: str | None, params: dict) -> list[str]:

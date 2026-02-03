@@ -16,11 +16,11 @@ model:
   om_init_scale: 2
 
 training:
-  epochs: 25
+  epochs: 250
   train_iterations: 10
-  val_iterations: 10
-  K: 5
-  batch_size: 10
+  val_iterations: 1
+  K: 1
+  batch_size: 1
   vary_seed: true
   vary_data: false
 
@@ -36,7 +36,7 @@ loss:
 regularization:
   positivity:
     _target_: schedulers.GECO
-    lambda_init: 0.1
+    lambda_init: 1
     k: -9
     alpha: 0.9
     gamma: 0.001
