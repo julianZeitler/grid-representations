@@ -8,6 +8,7 @@ import hydra
 import mlflow
 from omegaconf import DictConfig, OmegaConf
 import torch
+from tqdm import tqdm
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
@@ -187,7 +188,8 @@ def train(cfg: DictConfig) -> None:
                                   collate_fn=make_collate_fn(device)))
 
         with tempfile.TemporaryDirectory() as tmpdir:
-            for epoch in range(1, cfg.training.epochs + 1):
+            epoch_pbar = tqdm(range(1, cfg.training.epochs + 1), desc=f"[k={k}] Training")
+            for epoch in epoch_pbar:
                 train_loss, loss_components = train_epoch(
                     model,
                     train_loader,
@@ -216,12 +218,12 @@ def train(cfg: DictConfig) -> None:
                 metrics[f"k{k}/positivity_geco"] = geco_pos.L
                 metrics[f"k{k}/norm_geco"] = geco_norm.L
                 mlflow.log_metrics(metrics, step=epoch)
-                print(f"[k={k}] Epoch {epoch}: train_loss={train_loss:.4f}, val_loss={val_loss:.4f}")
+                epoch_pbar.set_postfix(train_loss=f"{train_loss:.4f}", val_loss=f"{val_loss:.4f}")
 
                 if checker is not None:
                     if checker.step(**loss_components):
-                        print(f"[k={k}] Converged at epoch {epoch}")
-                        print(f"[k={k}] Final smoothed: {checker.current_smoothed}")
+                        tqdm.write(f"[k={k}] Converged at epoch {epoch}")
+                        tqdm.write(f"[k={k}] Final smoothed: {checker.current_smoothed}")
                         break
 
                 checkpoint_path = os.path.join(tmpdir, f"checkpoint_k_{k}_epoch_{epoch}.pt")

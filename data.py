@@ -6,6 +6,7 @@ import pickle
 from typing import Any, Generator
 
 import matplotlib.pyplot as plt
+from tqdm import tqdm
 import numpy as np
 import torch
 from matplotlib.axes import Axes
@@ -299,9 +300,7 @@ class TrajectoryGenerator:
         if not os.path.exists(savepath):
             os.makedirs(savepath)
 
-        print(f"Generating {num_sequences} sequences with {n_shift} shifts each...")
-
-        for idx in range(num_sequences):
+        for idx in tqdm(range(num_sequences), desc="Generating sequences"):
             # Generate single trajectory [L, 2]
             positions = self.generate_trajectory(box_width, box_height, sequence_length)
 
@@ -320,9 +319,6 @@ class TrajectoryGenerator:
             with open(batch_path, 'wb') as f:
                 pickle.dump(batch, f)
 
-            if (idx + 1) % 100 == 0:
-                print(f"Generated {idx + 1}/{num_sequences} sequences")
-
         # Save metadata
         metadata = {
             'num_sequences': num_sequences,
@@ -335,7 +331,7 @@ class TrajectoryGenerator:
         with open(os.path.join(savepath, 'metadata.json'), 'w') as f:
             json.dump(metadata, f)
 
-        print(f"Dataset generation complete! Saved to {savepath}")
+        tqdm.write(f"Dataset generation complete! Saved to {savepath}")
 
     def visualize_trajectories(
         self,
