@@ -35,16 +35,30 @@ def get_ratemaps(model: nn.Module, res: int, widths: tuple) -> list[np.ndarray]:
         phi_x, phi_y = np.meshgrid(phi, phi)
         positions = np.stack([phi_x.flatten(), phi_y.flatten()], axis=1)
 
-        # Convert to tensor: (1, res*res, 2)
-        positions_tensor = torch.tensor(positions, dtype=torch.float32, device=device)
-        positions_tensor = positions_tensor.unsqueeze(0)
+        positions_shifted = np.roll(positions, 1, axis=0)
+        positions_shifted[0] = 0
+        d_pos = positions - positions_shifted
 
-        # Use forward pass to get representations
-        z, _ = model(positions_tensor)
-        z = z.squeeze(0)  # (res*res, latent_size)
+        # Convert to tensor and compute representations
+        displacements = torch.tensor(d_pos, dtype=torch.float32, device=device).unsqueeze(0)
+        # positions_tensor = torch.tensor(positions, dtype=torch.float32, device=device).unsqueeze(1)
+
+        # Use step function to get representation at each position from z0
+        z, _ = model(displacements, norm=True)
 
         # Shape: (res*res, latent_size) -> (latent_size, res*res)
         V = z.cpu().numpy().T
+
+        # Shape: (Batch=4900, 2)
+        # pos_tensor = torch.tensor(positions, dtype=torch.float32, device=device)
+
+        # # get_T is vectorized and O(1) parallel, not sequential!
+        # T = model.get_T(pos_tensor) 
+
+        # # Apply transform to z0 for all positions in one parallel operation
+        # z0 = model.z0.unsqueeze(0) # (1, D)
+        # V = torch.einsum('bij,kj->bi', T, z0).cpu().numpy().T # (4900, D)
+        
         ratemaps.append(V)
 
     return ratemaps
@@ -213,8 +227,8 @@ def create_loss_plots_from_mlflow(k: int) -> None:
         "train_loss": f"k{k}/train_loss",
         "val_loss": f"k{k}/val_loss",
         "separation": f"k{k}/separation",
-        "positivity": f"k{k}/positivity",
-        "norm": f"k{k}/norm",
+        "positivity_geco": f"k{k}/positivity_geco",
+        "norm_geco": f"k{k}/norm_geco",
         "lambda_pos": f"k{k}/lambda_pos",
         "lambda_norm": f"k{k}/lambda_norm",
     }
@@ -239,8 +253,8 @@ def create_loss_plots_from_mlflow(k: int) -> None:
     train_L = np.array([
         metrics_data.get("train_loss", np.zeros(n_epochs)),
         metrics_data.get("separation", np.zeros(n_epochs)),
-        metrics_data.get("positivity", np.zeros(n_epochs)),
-        metrics_data.get("norm", np.zeros(n_epochs)),
+        metrics_data.get("positivity_geco", np.zeros(n_epochs)),
+        metrics_data.get("norm_geco", np.zeros(n_epochs)),
     ])
 
     val_L = np.array([
@@ -260,7 +274,7 @@ def create_loss_plots_from_mlflow(k: int) -> None:
     log_figure(fig, f"loss_curves_k{k}")
 
 
-def generate_2d_plots(model: nn.Module, k: int = 0) -> dict:
+def generate_2d_plots(model: nn.Module, k: int = 0):# -> dict:
     """Generate analysis plots for a trained 2D model.
 
     Args:
@@ -344,4 +358,4 @@ def generate_2d_plots(model: nn.Module, k: int = 0) -> dict:
     neuron_lg_fig = neuron_plotter_2d(V_large_norm, res, scores["lg_60"])
     log_figure(neuron_lg_fig, f"neurons_large_k{k}")
 
-    return scores
+    return scores, neuron_lg_fig
