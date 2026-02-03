@@ -196,6 +196,62 @@ def log_figure(fig: plt.Figure, name: str) -> None:
     plt.close(fig)
 
 
+def create_loss_plots_from_mlflow(k: int) -> None:
+    """Create loss plots from MLflow logged metrics.
+
+    Args:
+        k: Run index to plot
+    """
+    client = mlflow.tracking.MlflowClient()
+    run_id = mlflow.active_run().info.run_id
+
+    # Metric names logged during training
+    metric_names = {
+        "train_loss": f"k{k}/train_loss",
+        "val_loss": f"k{k}/val_loss",
+        "separation": f"k{k}/separation",
+        "positivity": f"k{k}/positivity",
+        "norm": f"k{k}/norm",
+    }
+
+    # Fetch metrics from MLflow
+    metrics_data = {}
+    for name, metric_key in metric_names.items():
+        history = client.get_metric_history(run_id, metric_key)
+        if history:
+            # Sort by step and extract values
+            history = sorted(history, key=lambda x: x.step)
+            metrics_data[name] = np.array([m.value for m in history])
+
+    if not metrics_data:
+        return
+
+    # Build arrays for loss_plots function
+    n_epochs = len(metrics_data.get("train_loss", []))
+    if n_epochs == 0:
+        return
+
+    train_L = np.array([
+        metrics_data.get("train_loss", np.zeros(n_epochs)),
+        metrics_data.get("separation", np.zeros(n_epochs)),
+        metrics_data.get("positivity", np.zeros(n_epochs)),
+        metrics_data.get("norm", np.zeros(n_epochs)),
+    ])
+
+    val_L = np.array([
+        metrics_data.get("val_loss", np.zeros(n_epochs)),
+        np.zeros(n_epochs),  # val separation not logged separately
+        np.zeros(n_epochs),  # val positivity not logged separately
+        np.zeros(n_epochs),  # val norm not logged separately
+    ])
+
+    min_idx = np.argmin(train_L[0])
+    min_L = (min_idx, train_L[0][min_idx])
+
+    fig = loss_plots(train_L, min_L, val_L=val_L)
+    log_figure(fig, f"loss_curves_k{k}")
+
+
 def generate_2d_plots(model: nn.Module, k: int = 0) -> dict:
     """Generate analysis plots for a trained 2D model.
 
