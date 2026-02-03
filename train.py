@@ -216,6 +216,8 @@ def train(cfg: DictConfig) -> None:
 
                 metrics = {f"k{k}/train_loss": train_loss, f"k{k}/val_loss": val_loss}
                 metrics.update({f"k{k}/{name}": val for name, val in loss_components.items()})
+                metrics[f"k{k}/lambda_pos"] = geco_pos.lambda_val
+                metrics[f"k{k}/lambda_norm"] = geco_norm.lambda_val
                 mlflow.log_metrics(metrics, step=epoch)
                 print(f"[k={k}] Epoch {epoch}: train_loss={train_loss:.4f}, val_loss={val_loss:.4f}")
 
@@ -246,7 +248,7 @@ def train(cfg: DictConfig) -> None:
 
 @hydra.main(version_base=None, config_path="config", config_name="config")
 def main(cfg: DictConfig) -> None:
-    mlflow.set_tracking_uri("file:./mlruns")
+    mlflow.set_tracking_uri("sqlite:///mlruns.db")
     mlflow.set_experiment("grid-representations")
 
     with mlflow.start_run():

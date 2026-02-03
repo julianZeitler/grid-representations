@@ -7,7 +7,7 @@ from hydra.core.global_hydra import GlobalHydra
 
 from train import train
 
-mlflow.set_tracking_uri("file:./mlruns")
+mlflow.set_tracking_uri("sqlite:///mlruns.db")
 mlflow.set_experiment("grid-representations")
 
 config_dir = os.path.abspath("config")

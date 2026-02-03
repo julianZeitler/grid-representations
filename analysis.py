@@ -4,9 +4,11 @@ import os
 import mlflow
 import numpy as np
 import matplotlib.pyplot as plt
+from matplotlib.ticker import MaxNLocator
 import torch
 import torch.nn as nn
 from tqdm import tqdm
+from typing import Optional
 
 from scores import GridScorer
 
@@ -33,13 +35,13 @@ def get_ratemaps(model: nn.Module, res: int, widths: tuple) -> list[np.ndarray]:
         phi_x, phi_y = np.meshgrid(phi, phi)
         positions = np.stack([phi_x.flatten(), phi_y.flatten()], axis=1)
 
-        # Convert to tensor and compute representations
+        # Convert to tensor: (1, res*res, 2)
         positions_tensor = torch.tensor(positions, dtype=torch.float32, device=device)
+        positions_tensor = positions_tensor.unsqueeze(0)
 
-        # Use step function to get representation at each position from z0
-        z0 = model.z0.unsqueeze(0).expand(positions_tensor.shape[0], -1)
-        T = model.get_T(positions_tensor)
-        z = torch.einsum('bij,bj->bi', T, z0)
+        # Use forward pass to get representations
+        z, _ = model(positions_tensor)
+        z = z.squeeze(0)  # (res*res, latent_size)
 
         # Shape: (res*res, latent_size) -> (latent_size, res*res)
         V = z.cpu().numpy().T
@@ -103,8 +105,8 @@ def quantitative_analysis(Vs: list[np.ndarray], widths: tuple, res: int = 70) ->
     return fig_score, scores
 
 
-def loss_plots(L: np.ndarray, min_L: tuple, lambda_pos: np.ndarray = None,
-               lambda_norm: np.ndarray = None, val_L: np.ndarray = None) -> plt.Figure:
+def loss_plots(L: np.ndarray, min_L: tuple, lambda_pos: Optional[np.ndarray] = None,
+               lambda_norm: Optional[np.ndarray] = None, val_L: Optional[np.ndarray] = None) -> plt.Figure:
     """Generate loss evolution plots.
 
     Args:
@@ -131,7 +133,8 @@ def loss_plots(L: np.ndarray, min_L: tuple, lambda_pos: np.ndarray = None,
             ax1.plot(val_x, val_L[counter, :], color='tab:green', linestyle='--',
                      alpha=0.8, label='Validation')
 
-        ax1.set_xlabel('Iteration (x save_iters)')
+        ax1.set_xlabel('Epoch')
+        ax1.xaxis.set_major_locator(MaxNLocator(integer=True))
         ax1.set_ylabel(titles[counter], color=color1)
         ax1.tick_params(axis='y', labelcolor=color1)
         ax1.set_title(titles[counter])
@@ -212,6 +215,8 @@ def create_loss_plots_from_mlflow(k: int) -> None:
         "separation": f"k{k}/separation",
         "positivity": f"k{k}/positivity",
         "norm": f"k{k}/norm",
+        "lambda_pos": f"k{k}/lambda_pos",
+        "lambda_norm": f"k{k}/lambda_norm",
     }
 
     # Fetch metrics from MLflow
@@ -245,10 +250,13 @@ def create_loss_plots_from_mlflow(k: int) -> None:
         np.zeros(n_epochs),  # val norm not logged separately
     ])
 
+    lambda_pos = metrics_data.get("lambda_pos")
+    lambda_norm = metrics_data.get("lambda_norm")
+
     min_idx = np.argmin(train_L[0])
     min_L = (min_idx, train_L[0][min_idx])
 
-    fig = loss_plots(train_L, min_L, val_L=val_L)
+    fig = loss_plots(train_L, min_L, lambda_pos=lambda_pos, lambda_norm=lambda_norm, val_L=val_L)
     log_figure(fig, f"loss_curves_k{k}")
 
 
