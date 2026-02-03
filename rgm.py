@@ -5,6 +5,8 @@ import torch
 import torch.nn as nn
 from torch.nn import init
 
+torch.set_float32_matmul_precision('high')
+
 class ActionableRGM(nn.Module):
     """
     Transitions with irrep basis

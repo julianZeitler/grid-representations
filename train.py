@@ -15,8 +15,6 @@ from analysis import generate_2d_plots, create_loss_plots_from_mlflow
 from data import TrajectoryDataset, TrajectoryGenerator, make_collate_fn
 from schedulers import ConvergenceChecker, GECO
 
-torch.set_float32_matmul_precision('high')
-
 
 def train_epoch(
     model: nn.Module,
