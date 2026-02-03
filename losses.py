@@ -75,6 +75,8 @@ def norm(z: torch.Tensor, z_shift: torch.Tensor) -> torch.Tensor:
     B_out, _, _ = z_shift.shape
     N_shift = B_out // B
 
+    # Use the z to normalise z_shift
+    # ASSUMPTION: norm can be calculated from B*L
     norms = z.reshape(B * L, D).norm(dim=0).detach()
     z_normalized = z_shift / norms
 
@@ -82,10 +84,10 @@ def norm(z: torch.Tensor, z_shift: torch.Tensor) -> torch.Tensor:
     return (norms_out - 1).norm() / (N_shift * D)
 
 def chi(x: torch.Tensor, sigma_theta: float, f: float, causal: bool = True) -> torch.Tensor:
-    """Compute target similarity matrix from positions.
+    """Compute target similarity matrix from displacement vectors.
 
     Args:
-        x: Position tensor of shape (seq_len, dim) or (batch, seq_len, dim).
+        x: Displacement tensor of shape (batch, seq_len, dim).
         sigma_theta: Bandwidth for kernel.
         f: Scaling factor for similarity.
         causal: If True, mask future timesteps with lower triangular.
@@ -93,10 +95,9 @@ def chi(x: torch.Tensor, sigma_theta: float, f: float, causal: bool = True) -> t
     Returns:
         Chi matrix of shape (seq_len, seq_len) or (batch, seq_len, seq_len).
     """
-    if x.ndim == 2:
-        dist = torch.sum((x[:, None, :] - x[None, :, :]) ** 2, dim=2)
-    else:
-        dist = torch.sum((x[:, :, None, :] - x[:, None, :, :]) ** 2, dim=3)
+    # transform displacements into actual positions
+    positions = torch.cumsum(x, dim=1)
+    dist = torch.sum((positions[:, :, None, :] - positions[:, None, :, :]) ** 2, dim=3)
 
     if causal:
         dist = torch.tril(dist)
@@ -114,8 +115,8 @@ def total_sep_loss(
     """Compute combined loss with GECO-weighted regularization.
 
     Args:
-        z: Latent states of shape (batch, seq_len, latent_size).
-        z_shift: Shifted latent states for norm loss, or None to skip.
+        z: Latent states of shape (batch, seq_len, latent_size). Must be unnormalized!
+        z_shift: Shifted latent states for norm loss. Must be unnormalized!
         x: Position tensor of shape (batch, seq_len, dim).
         geco_pos: GECO instance for positivity regularization.
         geco_norm: GECO instance for norm regularization.
@@ -124,9 +125,12 @@ def total_sep_loss(
     Returns:
         Tuple of (total_loss, components_dict).
     """
-    target_chi = chi(x, cfg.sigma_theta, cfg.f, causal=True)
-    loss_sep = cfg.sep_scale * separation(z, target_chi, cfg.sigma_sq, causal=True, decay=cfg.get("decay"))
-    loss_pos = positivity(z)
+    norms = torch.linalg.norm(z, dim=1, keepdim=True) # norm along sequence dim
+    z_norm = z / (norms + 1e-5)
+
+    target_chi = chi(x, cfg.sigma_theta, cfg.f, causal=cfg.causal)
+    loss_sep = cfg.sep_scale * separation(z_norm, target_chi, cfg.sigma_sq, causal=cfg.causal, decay=cfg.get("decay"))
+    loss_pos = positivity(z_norm)
     loss_norm = norm(z, z_shift)
 
     # Total loss

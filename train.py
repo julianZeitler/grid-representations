@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import tempfile
+from collections.abc import Iterator
 
 import hydra
 import mlflow
@@ -19,14 +20,13 @@ torch.set_float32_matmul_precision('high')
 
 def train_epoch(
     model: nn.Module,
-    data_loader: DataLoader,
+    data_loader: Iterator[tuple[torch.Tensor, torch.Tensor]],
     loss_fn,
     loss_cfg: DictConfig,
     optimizer: torch.optim.Optimizer,
     geco_pos: GECO,
     geco_norm: GECO,
-    iterations: int,
-    epoch: int = 0
+    iterations: int
 ) -> tuple[float, dict[str, float]]:
     """Train for one epoch.
 
@@ -45,12 +45,12 @@ def train_epoch(
     total_loss = 0.0
     component_sums: dict[str, float] = {}
 
-    for _ in range(epoch*iterations, (epoch+1)*iterations):
-        batch, shift_batch = next(iter(data_loader))
+    for _ in range(iterations):
+        batch, shift_batch = next(data_loader)
 
         optimizer.zero_grad()
-        z, _ = model(batch)
-        z_shift, _ = model(shift_batch)
+        z, _ = model(batch, norm=False)
+        z_shift, _ = model(shift_batch, norm=False)
         loss, components = loss_fn(
             z,
             z_shift,
@@ -76,13 +76,12 @@ def train_epoch(
 @torch.no_grad()
 def evaluate(
     model: nn.Module,
-    data_loader: DataLoader,
+    data_loader: Iterator[tuple[torch.Tensor, torch.Tensor]],
     loss_fn,
     loss_cfg: DictConfig,
     geco_pos: GECO,
     geco_norm: GECO,
-    iterations: int,
-    epoch: int = 0
+    iterations: int
 ) -> tuple[float, dict[str, float]]:
     """Evaluate model on validation set.
 
@@ -100,11 +99,11 @@ def evaluate(
     total_loss = 0.0
     component_sums: dict[str, float] = {}
 
-    for _ in range(epoch*iterations, (epoch+1)*iterations):
-        batch, shift_batch = next(iter(data_loader))
+    for _ in range(iterations):
+        batch, shift_batch = next(data_loader)
 
-        z, _ = model(batch)
-        z_shift, _ = model(shift_batch)
+        z, _ = model(batch, norm=False)
+        z_shift, _ = model(shift_batch, norm=False)
         loss, components = loss_fn(
             z,
             z_shift,
@@ -183,11 +182,11 @@ def train(cfg: DictConfig) -> None:
             )
 
         train_dataset = TrajectoryDataset(train_path)
-        train_loader = DataLoader(train_dataset, batch_size=cfg.training.batch_size, shuffle=False,
-                                  collate_fn=make_collate_fn(device))
+        train_loader = iter(DataLoader(train_dataset, batch_size=cfg.training.batch_size, shuffle=False,
+                                  collate_fn=make_collate_fn(device)))
         val_dataset = TrajectoryDataset(val_path)
-        val_loader = DataLoader(val_dataset, batch_size=cfg.training.batch_size, shuffle=True,
-                                  collate_fn=make_collate_fn(device))
+        val_loader = iter(DataLoader(val_dataset, batch_size=cfg.training.batch_size, shuffle=True,
+                                  collate_fn=make_collate_fn(device)))
 
         with tempfile.TemporaryDirectory() as tmpdir:
             for epoch in range(1, cfg.training.epochs + 1):
@@ -200,7 +199,6 @@ def train(cfg: DictConfig) -> None:
                     geco_pos,
                     geco_norm,
                     cfg.training.train_iterations,
-                    epoch
                 )
 
                 val_loss, _ = evaluate(
@@ -211,13 +209,14 @@ def train(cfg: DictConfig) -> None:
                     geco_pos,
                     geco_norm,
                     cfg.training.val_iterations,
-                    epoch
                 )
 
                 metrics = {f"k{k}/train_loss": train_loss, f"k{k}/val_loss": val_loss}
                 metrics.update({f"k{k}/{name}": val for name, val in loss_components.items()})
                 metrics[f"k{k}/lambda_pos"] = geco_pos.lambda_val
                 metrics[f"k{k}/lambda_norm"] = geco_norm.lambda_val
+                metrics[f"k{k}/positivity_geco"] = geco_pos.L
+                metrics[f"k{k}/norm_geco"] = geco_norm.L
                 mlflow.log_metrics(metrics, step=epoch)
                 print(f"[k={k}] Epoch {epoch}: train_loss={train_loss:.4f}, val_loss={val_loss:.4f}")
 

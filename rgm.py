@@ -133,7 +133,7 @@ class ActionableRGM(nn.Module):
         self,
         input: torch.Tensor,
         z0: torch.Tensor | None = None,
-        norm: bool = False
+        norm: bool = True
     ) -> tuple[torch.Tensor, torch.Tensor]:
         """
         Vectorized forward pass for ActionableRGM.
