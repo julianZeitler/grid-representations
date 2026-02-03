@@ -10,6 +10,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 
+from analysis import generate_2d_plots
 from data import TrajectoryDataset, TrajectoryGenerator, make_collate_fn
 from schedulers import ConvergenceChecker, GECO
 
@@ -238,6 +239,8 @@ def train(cfg: DictConfig) -> None:
         state_dict_path = os.path.join(tempfile.gettempdir(), f"model_k{k}_state_dict.pt")
         torch.save(model.state_dict(), state_dict_path)
         mlflow.log_artifact(state_dict_path, artifact_path="models")
+
+        generate_2d_plots(model, k=k)
 
 
 @hydra.main(version_base=None, config_path="config", config_name="config")
