@@ -128,9 +128,13 @@ def total_sep_loss(
     norms = torch.linalg.norm(z, dim=1, keepdim=True) # norm along sequence dim
     z_norm = z / (norms + 1e-5)
 
+    z_shift_norms = torch.linalg.norm(z_shift, dim=1, keepdim=True)
+    z_shift_norm = z_shift / (z_shift_norms + 1e-5)
+    z_combined = torch.cat([z_norm.flatten(0, 1), z_shift_norm.flatten(0, 1)], dim=0)
+
     target_chi = chi(x, cfg.sigma_theta, cfg.f, causal=cfg.causal)
     loss_sep = cfg.sep_scale * separation(z_norm, target_chi, cfg.sigma_sq, causal=cfg.causal, decay=cfg.get("decay"))
-    loss_pos = positivity(z_norm)
+    loss_pos = positivity(z_combined)
     loss_norm = norm(z, z_shift)
 
     # Total loss
