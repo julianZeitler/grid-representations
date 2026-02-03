@@ -35,30 +35,15 @@ def get_ratemaps(model: nn.Module, res: int, widths: tuple) -> list[np.ndarray]:
         phi_x, phi_y = np.meshgrid(phi, phi)
         positions = np.stack([phi_x.flatten(), phi_y.flatten()], axis=1)
 
-        positions_shifted = np.roll(positions, 1, axis=0)
-        positions_shifted[0] = 0
-        d_pos = positions - positions_shifted
-
-        # Convert to tensor and compute representations
-        displacements = torch.tensor(d_pos, dtype=torch.float32, device=device).unsqueeze(0)
-        # positions_tensor = torch.tensor(positions, dtype=torch.float32, device=device).unsqueeze(1)
+        positions_tensor = torch.tensor(positions, dtype=torch.float32, device=device).unsqueeze(1)
 
         # Use step function to get representation at each position from z0
-        z, _ = model(displacements, norm=True)
+        z, _ = model(positions_tensor, norm=False)
+        z = z / (z.norm(dim=0) + 1e-5)
 
         # Shape: (res*res, latent_size) -> (latent_size, res*res)
         V = z.cpu().numpy().T
 
-        # Shape: (Batch=4900, 2)
-        # pos_tensor = torch.tensor(positions, dtype=torch.float32, device=device)
-
-        # # get_T is vectorized and O(1) parallel, not sequential!
-        # T = model.get_T(pos_tensor) 
-
-        # # Apply transform to z0 for all positions in one parallel operation
-        # z0 = model.z0.unsqueeze(0) # (1, D)
-        # V = torch.einsum('bij,kj->bi', T, z0).cpu().numpy().T # (4900, D)
-        
         ratemaps.append(V)
 
     return ratemaps
@@ -274,7 +259,7 @@ def create_loss_plots_from_mlflow(k: int) -> None:
     log_figure(fig, f"loss_curves_k{k}")
 
 
-def generate_2d_plots(model: nn.Module, k: int = 0):# -> dict:
+def generate_2d_plots(model: nn.Module, k: int = 0) -> dict:
     """Generate analysis plots for a trained 2D model.
 
     Args:
@@ -342,20 +327,14 @@ def generate_2d_plots(model: nn.Module, k: int = 0):# -> dict:
         if isinstance(value, (int, float)):
             mlflow.log_metric(f"k{k}/{key}", value)
 
-    # Normalize by large room norms for visualization
-    large_norms = np.linalg.norm(V_large, axis=1, keepdims=True)
-    V_small_norm = V_small / large_norms
-    V_medium_norm = V_medium / large_norms
-    V_large_norm = V_large / large_norms
-
     # Neuron plots
-    neuron_sm_fig = neuron_plotter_2d(V_small_norm, res, scores["sm_60"])
+    neuron_sm_fig = neuron_plotter_2d(V_small, res, scores["sm_60"])
     log_figure(neuron_sm_fig, f"neurons_small_k{k}")
 
-    neuron_md_fig = neuron_plotter_2d(V_medium_norm, res, scores["md_60"])
+    neuron_md_fig = neuron_plotter_2d(V_medium, res, scores["md_60"])
     log_figure(neuron_md_fig, f"neurons_medium_k{k}")
 
-    neuron_lg_fig = neuron_plotter_2d(V_large_norm, res, scores["lg_60"])
+    neuron_lg_fig = neuron_plotter_2d(V_large, res, scores["lg_60"])
     log_figure(neuron_lg_fig, f"neurons_large_k{k}")
 
-    return scores, neuron_lg_fig
+    return scores
