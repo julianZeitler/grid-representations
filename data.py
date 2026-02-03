@@ -68,21 +68,34 @@ class TrajectoryDataset(Dataset):
         return self.num_sequences
 
     def __getitem__(self, idx: int) -> tuple[torch.Tensor, torch.Tensor]:
-        """Load and return a trajectory batch.
+        """Load and return a trajectory batch as displacements.
 
         Args:
             idx: Index of the batch to load.
 
         Returns:
-            Tuple of (normal, shift) tensors where:
-                - normal: Original trajectory of shape [L, 2]
-                - shift: Shifted trajectories of shape [n_shift, L, 2]
+            Tuple of (normal, shift) displacement tensors where:
+                - normal: Displacements of shape [L, 2]
+                - shift: Shifted displacements of shape [n_shift, L, 2]
         """
         batch_path = os.path.join(self.base_path, f'batch_{idx:05d}.pkl')
         with open(batch_path, 'rb') as f:
             batch = pickle.load(f)
 
-        return torch.from_numpy(batch["normal"]), torch.from_numpy(batch["shift"])
+        normal = batch["normal"]  # [L, 2]
+        shift = batch["shift"]    # [n_shift, L, 2]
+
+        # Convert positions to displacements: d_phi[t] = phi[t] - phi[t-1]
+        # First displacement is from origin: d_phi[0] = phi[0]
+        normal_shifted = np.roll(normal, 1, axis=0)
+        normal_shifted[0] = 0
+        d_normal = normal - normal_shifted
+
+        shift_shifted = np.roll(shift, 1, axis=1)
+        shift_shifted[:, 0, :] = 0
+        d_shift = shift - shift_shifted
+
+        return torch.from_numpy(d_normal), torch.from_numpy(d_shift)
 
 class TrajectoryGenerator:
     """Generator for random walk trajectories in a rectangular environment.
