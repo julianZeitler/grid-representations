@@ -152,14 +152,14 @@ def train(cfg: DictConfig) -> None:
             model.reset_parameters(seed=42)
 
         if cfg.training.vary_data:
-            train_path = f"data/train/dim_{cfg.data.dim}_box_{cfg.data.box_width}x{cfg.data.box_height}_seq_len_{cfg.data.seq_len}_n_shift_{cfg.data.n_shift}_sigma_shift_{cfg.data.sigma_shift}_k_{k}"
+            train_path = f"data/dim_{cfg.data.dim}_box_{cfg.data.box_width}x{cfg.data.box_height}_seq_len_{cfg.data.seq_len}_n_shift_{cfg.data.n_shift}_sigma_shift_{cfg.data.sigma_shift}/train/k_{k}"
         else:
-            train_path = f"data/train/dim_{cfg.data.dim}_box_{cfg.data.box_width}x{cfg.data.box_height}_seq_len_{cfg.data.seq_len}_n_shift_{cfg.data.n_shift}_sigma_shift_{cfg.data.sigma_shift}_k_0"
+            train_path = f"data/dim_{cfg.data.dim}_box_{cfg.data.box_width}x{cfg.data.box_height}_seq_len_{cfg.data.seq_len}_n_shift_{cfg.data.n_shift}_sigma_shift_{cfg.data.sigma_shift}/train/k_0"
         if not os.path.exists(train_path):
             generator = TrajectoryGenerator()
             generator.generate_dataset(
                 train_path,
-                num_sequences=1000000/cfg.data.seq_len,
+                num_sequences=3000000//cfg.data.seq_len,
                 sequence_length=cfg.data.seq_len,
                 box_width=cfg.data.box_width,
                 box_height=cfg.data.box_height,
@@ -167,12 +167,12 @@ def train(cfg: DictConfig) -> None:
                 sigma_shift=cfg.data.sigma_shift,
             )
 
-        val_path = f"data/val/dim_{cfg.data.dim}_box_{cfg.data.box_width}x{cfg.data.box_height}_seq_len_{cfg.data.seq_len}_n_shift_{cfg.data.n_shift}_sigma_shift_{cfg.data.sigma_shift}"
+        val_path = f"data/dim_{cfg.data.dim}_box_{cfg.data.box_width}x{cfg.data.box_height}_seq_len_{cfg.data.seq_len}_n_shift_{cfg.data.n_shift}_sigma_shift_{cfg.data.sigma_shift}/val"
         if not os.path.exists(val_path):
             generator = TrajectoryGenerator()
             generator.generate_dataset(
                 val_path,
-                num_sequences=100000/cfg.data.seq_len,
+                num_sequences=300000//cfg.data.seq_len,
                 sequence_length=cfg.data.seq_len,
                 box_width=cfg.data.box_width,
                 box_height=cfg.data.box_height,

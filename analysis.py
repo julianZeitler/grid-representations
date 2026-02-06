@@ -1,10 +1,7 @@
-import tempfile
-import os
-
 import mlflow
 import numpy as np
-import matplotlib.pyplot as plt
-from matplotlib.ticker import MaxNLocator
+import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import torch
 import torch.nn as nn
 from tqdm import tqdm
@@ -49,7 +46,7 @@ def get_ratemaps(model: nn.Module, res: int, widths: tuple) -> list[np.ndarray]:
     return ratemaps
 
 
-def quantitative_analysis(Vs: list[np.ndarray], widths: tuple, res: int = 70) -> tuple[plt.Figure, dict]:
+def quantitative_analysis(Vs: list[np.ndarray], widths: tuple, res: int = 70) -> tuple[go.Figure, dict]:
     """Compute grid scores for ratemaps at different scales.
 
     Args:
@@ -61,7 +58,7 @@ def quantitative_analysis(Vs: list[np.ndarray], widths: tuple, res: int = 70) ->
         Tuple of (figure, scores_dict)
     """
     scores = {}
-    fig_score, axes = plt.subplots(1, 3, figsize=(12, 5))
+    fig_score = make_subplots(rows=1, cols=3, subplot_titles=["Small Ratemaps", "Medium Ratemaps", "Large Ratemaps"])
     scale_names = ["sm", "md", "lg"]
     scale_titles = ["Small Ratemaps", "Medium Ratemaps", "Large Ratemaps"]
 
@@ -81,16 +78,22 @@ def quantitative_analysis(Vs: list[np.ndarray], widths: tuple, res: int = 70) ->
         score_60 = np.nan_to_num(score_60)
         score_90 = np.nan_to_num(score_90)
 
-        axes[idx].hist(score_60, range=(-1, 2.5), bins=15)
-        axes[idx].set_xlabel('Grid score')
-        axes[idx].set_ylabel('Count')
-        axes[idx].set_title(scale_titles[idx])
-
         max_score = np.max(score_60)
         mean_score = np.mean(score_60)
-        axes[idx].text(0.05, 0.95, f'Max: {max_score:.3f}\nMean: {mean_score:.3f}',
-                       transform=axes[idx].transAxes, verticalalignment='top',
-                       bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+
+        fig_score.add_trace(
+            go.Histogram(x=score_60, xbins=dict(start=-2, end=2, size=4/15),
+                         name=scale_titles[idx], marker_color='steelblue'),
+            row=1, col=idx + 1
+        )
+
+        axis_suffix = "" if idx == 0 else str(idx + 1)
+        fig_score.add_annotation(
+            x=0.05, y=0.95, xref=f"x{axis_suffix} domain", yref=f"y{axis_suffix} domain",
+            text=f"Max: {max_score:.3f}<br>Mean: {mean_score:.3f}",
+            showarrow=False, bgcolor="wheat", opacity=0.8,
+            xanchor="left", yanchor="top", align="left"
+        )
 
         prefix = scale_names[idx]
         scores[f"{prefix}_60"] = score_60
@@ -100,72 +103,116 @@ def quantitative_analysis(Vs: list[np.ndarray], widths: tuple, res: int = 70) ->
         scores[f"{prefix}_90_max"] = np.max(score_90)
         scores[f"{prefix}_90_mean"] = np.mean(score_90)
 
-    fig_score.tight_layout()
+    fig_score.update_xaxes(title_text="Grid score", range=[-2, 2])
+    fig_score.update_yaxes(title_text="Count")
+    fig_score.update_layout(height=500, width=1200, showlegend=False)
     return fig_score, scores
 
 
-def loss_plots(L: np.ndarray, min_L: tuple, lambda_pos: Optional[np.ndarray] = None,
-               lambda_norm: Optional[np.ndarray] = None, val_L: Optional[np.ndarray] = None) -> plt.Figure:
+def loss_plots(
+    train_losses: dict[str, np.ndarray],
+    val_losses: Optional[dict[str, np.ndarray]] = None,
+    lambda_pos: Optional[np.ndarray] = None,
+    lambda_norm: Optional[np.ndarray] = None,
+) -> go.Figure:
     """Generate loss evolution plots.
 
     Args:
-        L: Loss array of shape [4, n_iters] containing [total, separation, positivity, norm]
-        min_L: Minimum loss information
+        train_losses: Dict with keys 'loss', 'separation', 'positivity', 'norm'
+        val_losses: Optional dict with same keys for validation losses
         lambda_pos: Optional array of lambda_pos values over iterations
         lambda_norm: Optional array of lambda_norm values over iterations
-        val_L: Optional validation loss array of shape [4, n_val_iters]
     """
+    keys = ['loss', 'separation', 'positivity', 'norm']
     titles = ['Loss', 'Separation', 'Positivity', 'Norm']
-    fig = plt.figure(figsize=(20, 8))
 
-    if val_L is not None:
-        n_train = L.shape[1]
-        n_val = val_L.shape[1]
-        val_x = np.linspace(0, n_train - 1, n_val)
+    # Determine which subplots need secondary y-axis (2x2 grid)
+    specs = [[], []]
+    for i, key in enumerate(keys):
+        has_secondary = (key == 'positivity' and lambda_pos is not None) or (key == 'norm' and lambda_norm is not None)
+        specs[i // 2].append({"secondary_y": has_secondary})
 
-    for counter in range(4):
-        ax1 = plt.subplot(1, 4, counter + 1)
-        color1 = 'tab:blue'
-        ax1.plot(L[counter, :], color=color1, label='Train')
+    fig = make_subplots(rows=2, cols=2, subplot_titles=titles, specs=specs,
+                        horizontal_spacing=0.12, vertical_spacing=0.16)
 
-        if val_L is not None:
-            ax1.plot(val_x, val_L[counter, :], color='tab:green', linestyle='--',
-                     alpha=0.8, label='Validation')
+    n_train = len(train_losses.get('loss', []))
 
-        ax1.set_xlabel('Epoch')
-        ax1.xaxis.set_major_locator(MaxNLocator(integer=True))
-        ax1.set_ylabel(titles[counter], color=color1)
-        ax1.tick_params(axis='y', labelcolor=color1)
-        ax1.set_title(titles[counter])
+    for counter, key in enumerate(keys):
+        if key not in train_losses:
+            continue
 
-        if val_L is not None and counter == 0:
-            ax1.legend(loc='upper right')
+        train_data = train_losses[key]
+        x_train = list(range(len(train_data)))
 
-        if counter == 2 and lambda_pos is not None:
-            ax2 = ax1.twinx()
-            color2 = 'tab:orange'
-            ax2.plot(lambda_pos, color=color2, alpha=0.7, linestyle='--')
-            ax2.set_ylabel('lambda_pos', color=color2)
-            ax2.tick_params(axis='y', labelcolor=color2)
-            ax2.set_zorder(ax1.get_zorder() + 1)
-            ax1.set_frame_on(False)
+        has_val = val_losses is not None and key in val_losses
+        show_in_legend = counter == 0 and has_val
 
-        elif counter == 3 and lambda_norm is not None:
-            ax2 = ax1.twinx()
-            color2 = 'tab:red'
-            ax2.plot(lambda_norm, color=color2, alpha=0.7, linestyle='--')
-            ax2.set_ylabel('lambda_norm', color=color2)
-            ax2.tick_params(axis='y', labelcolor=color2)
-            ax2.set_zorder(ax1.get_zorder() + 1)
-            ax1.set_frame_on(False)
+        row = counter // 2 + 1
+        col = counter % 2 + 1
 
-    plt.suptitle(f'Min Loss: {min_L[1]:.3f}')
-    plt.tight_layout()
+        fig.add_trace(
+            go.Scatter(x=x_train, y=train_data, mode='lines', name='Train',
+                       line=dict(color='blue'), showlegend=show_in_legend),
+            row=row, col=col
+        )
+
+        if has_val:
+            val_data = val_losses[key]
+            n_val = len(val_data)
+            val_x = np.linspace(0, n_train - 1, n_val).tolist()
+            fig.add_trace(
+                go.Scatter(x=val_x, y=val_data, mode='lines', name='Validation',
+                           line=dict(color='green', dash='dash'), opacity=0.8,
+                           showlegend=show_in_legend),
+                row=row, col=col
+            )
+
+        if key == 'positivity' and lambda_pos is not None:
+            fig.add_trace(
+                go.Scatter(x=list(range(len(lambda_pos))), y=lambda_pos, mode='lines',
+                           name='λ<sub>pos</sub>', line=dict(color='red', dash='dash'),
+                           opacity=0.8, showlegend=False),
+                row=row, col=col, secondary_y=True
+            )
+            fig.update_yaxes(title_text="λ<sub>pos</sub>", secondary_y=True, row=row, col=col,
+                             tickfont=dict(color='red'), title_font=dict(color='red'), title_standoff=5)
+
+        elif key == 'norm' and lambda_norm is not None:
+            fig.add_trace(
+                go.Scatter(x=list(range(len(lambda_norm))), y=lambda_norm, mode='lines',
+                           name='λ<sub>norm</sub>', line=dict(color='red', dash='dash'),
+                           opacity=0.8, showlegend=False),
+                row=row, col=col, secondary_y=True
+            )
+            fig.update_yaxes(title_text="λ<sub>norm</sub>", secondary_y=True, row=row, col=col,
+                             tickfont=dict(color='red'), title_font=dict(color='red'), title_standoff=5)
+
+    fig.update_xaxes(title_text="Epoch", title_standoff=5)
+    y_titles = {
+        'Loss': 'Loss',
+        'Separation': 'Separation',
+        'Positivity': 'Positivity = log(L<sub>2</sub>) - k<sub>pos</sub>',
+        'Norm': 'Norm = log(L<sub>3</sub>) - k<sub>norm</sub>',
+    }
+    for counter, title in enumerate(titles):
+        row = counter // 2 + 1
+        col = counter % 2 + 1
+        fig.update_yaxes(title_text=y_titles[title], row=row, col=col, secondary_y=False,
+                         tickfont=dict(color='blue'), title_font=dict(color='blue'))
+
+    fig.update_layout(
+        height=600, width=1000,
+        legend=dict(
+            x=0.4, y=0.99,
+            xanchor='right', yanchor='top',
+            bgcolor='rgba(255,255,255,0.7)',
+        )
+    )
 
     return fig
 
 
-def neuron_plotter_2d(V: np.ndarray, res: int, scores: np.ndarray = None) -> plt.Figure:
+def neuron_plotter_2d(V: np.ndarray, res: int, scores: np.ndarray = None) -> go.Figure:
     """Plot individual neuron ratemaps.
 
     Args:
@@ -177,25 +224,35 @@ def neuron_plotter_2d(V: np.ndarray, res: int, scores: np.ndarray = None) -> plt
     RowsD = int(np.ceil(np.sqrt(D)))
     ColumnsD = int(np.ceil(D / RowsD))
 
-    fig = plt.figure(figsize=(20, 16))
+    subplot_titles = [f'{scores[i]:.3f}' if scores is not None else '' for i in range(D)]
+    fig = make_subplots(rows=RowsD, cols=ColumnsD, subplot_titles=subplot_titles,
+                        horizontal_spacing=0.002, vertical_spacing=0.03)
+
+    vmin, vmax = V.min(), V.max()
+
     for neuron in range(D):
-        plt.subplot(RowsD, ColumnsD, neuron + 1)
-        plt.axis('off')
-        plt.imshow(np.reshape(V[neuron, :], [res, res]), vmin=V.min(), vmax=V.max())
-        plt.colorbar()
-        if scores is not None:
-            plt.title(f'{scores[neuron]:.3f}')
-    fig.tight_layout()
+        row = neuron // ColumnsD + 1
+        col = neuron % ColumnsD + 1
+        heatmap = go.Heatmap(
+            z=np.reshape(V[neuron, :], [res, res]),
+            zmin=vmin, zmax=vmax, colorscale='Viridis',
+            showscale=(neuron == 0)
+        )
+        fig.add_trace(heatmap, row=row, col=col)
+
+        axis_idx = neuron + 1
+        axis_suffix = "" if axis_idx == 1 else str(axis_idx)
+        fig.update_xaxes(showticklabels=False, showgrid=False, constrain='domain', row=row, col=col)
+        fig.update_yaxes(showticklabels=False, showgrid=False, scaleanchor=f'x{axis_suffix}',
+                         scaleratio=1, constrain='domain', row=row, col=col)
+    fig.update_layout(height=800, width=800)
     return fig
 
 
-def log_figure(fig: plt.Figure, name: str) -> None:
-    """Log a matplotlib figure to MLflow."""
-    with tempfile.TemporaryDirectory() as tmpdir:
-        filepath = os.path.join(tmpdir, f"{name}.png")
-        fig.savefig(filepath, dpi=150, bbox_inches='tight')
-        mlflow.log_artifact(filepath, artifact_path="figures")
-    plt.close(fig)
+def log_figure(fig: go.Figure, name: str) -> None:
+    """Log a plotly figure to MLflow in both PNG and HTML formats."""
+    mlflow.log_figure(fig, f"figures/{name}.png")
+    mlflow.log_figure(fig, f"figures/{name}.html")
 
 
 def create_loss_plots_from_mlflow(k: int) -> None:
@@ -204,59 +261,115 @@ def create_loss_plots_from_mlflow(k: int) -> None:
     Args:
         k: Run index to plot
     """
-    client = mlflow.tracking.MlflowClient()
-    run_id = mlflow.active_run().info.run_id
+    from mlflow.tracking import MlflowClient
 
-    # Metric names logged during training
-    metric_names = {
-        "train_loss": f"k{k}/train_loss",
-        "val_loss": f"k{k}/val_loss",
+    client = MlflowClient()
+    active_run = mlflow.active_run()
+    if active_run is None:
+        return
+    run_id = active_run.info.run_id
+
+    # Metric name mappings: internal key -> mlflow metric name
+    train_metrics = {
+        "loss": f"k{k}/train_loss",
         "separation": f"k{k}/separation",
-        "positivity_geco": f"k{k}/positivity_geco",
-        "norm_geco": f"k{k}/norm_geco",
+        "positivity": f"k{k}/positivity_geco",
+        "norm": f"k{k}/norm_geco",
+    }
+    val_metrics = {
+        "loss": f"k{k}/val_loss",
+    }
+    lambda_metrics = {
         "lambda_pos": f"k{k}/lambda_pos",
         "lambda_norm": f"k{k}/lambda_norm",
     }
 
-    # Fetch metrics from MLflow
-    metrics_data = {}
-    for name, metric_key in metric_names.items():
+    def fetch_metric(metric_key: str) -> Optional[np.ndarray]:
         history = client.get_metric_history(run_id, metric_key)
         if history:
-            # Sort by step and extract values
             history = sorted(history, key=lambda x: x.step)
-            metrics_data[name] = np.array([m.value for m in history])
+            return np.array([m.value for m in history])
+        return None
 
-    if not metrics_data:
+    # Build train losses dict
+    train_losses = {}
+    for key, metric_name in train_metrics.items():
+        data = fetch_metric(metric_name)
+        if data is not None:
+            train_losses[key] = data
+
+    if not train_losses:
         return
 
-    # Build arrays for loss_plots function
-    n_epochs = len(metrics_data.get("train_loss", []))
-    if n_epochs == 0:
-        return
+    # Build val losses dict (only include metrics that exist)
+    val_losses = {}
+    for key, metric_name in val_metrics.items():
+        data = fetch_metric(metric_name)
+        if data is not None:
+            val_losses[key] = data
 
-    train_L = np.array([
-        metrics_data.get("train_loss", np.zeros(n_epochs)),
-        metrics_data.get("separation", np.zeros(n_epochs)),
-        metrics_data.get("positivity_geco", np.zeros(n_epochs)),
-        metrics_data.get("norm_geco", np.zeros(n_epochs)),
-    ])
+    # Fetch lambda values
+    lambda_pos = fetch_metric(lambda_metrics["lambda_pos"])
+    lambda_norm = fetch_metric(lambda_metrics["lambda_norm"])
 
-    val_L = np.array([
-        metrics_data.get("val_loss", np.zeros(n_epochs)),
-        np.zeros(n_epochs),  # val separation not logged separately
-        np.zeros(n_epochs),  # val positivity not logged separately
-        np.zeros(n_epochs),  # val norm not logged separately
-    ])
-
-    lambda_pos = metrics_data.get("lambda_pos")
-    lambda_norm = metrics_data.get("lambda_norm")
-
-    min_idx = np.argmin(train_L[0])
-    min_L = (min_idx, train_L[0][min_idx])
-
-    fig = loss_plots(train_L, min_L, lambda_pos=lambda_pos, lambda_norm=lambda_norm, val_L=val_L)
+    fig = loss_plots(
+        train_losses,
+        val_losses=val_losses if val_losses else None,
+        lambda_pos=lambda_pos,
+        lambda_norm=lambda_norm,
+    )
     log_figure(fig, f"loss_curves_k{k}")
+
+
+def frequency_plot(om: np.ndarray) -> go.Figure:
+    """Plot frequency vectors.
+
+    Args:
+        om: Frequency array of shape (n_neurons, 2)
+
+    Returns:
+        Plotly figure
+    """
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=om[:, 0], y=om[:, 1], mode='markers',
+        marker=dict(size=12, opacity=0.6)
+    ))
+    fig.update_layout(
+        title='Frequency vectors',
+        xaxis_title='ω_x', yaxis_title='ω_y',
+        xaxis=dict(scaleanchor='y', scaleratio=1, zeroline=True, zerolinewidth=1, zerolinecolor='black'),
+        yaxis=dict(zeroline=True, zerolinewidth=1, zerolinecolor='black'),
+        width=600, height=600
+    )
+    return fig
+
+
+def s_matrix_plot(S: np.ndarray) -> go.Figure:
+    """Plot S matrix analysis (S, S^-1, and their product).
+
+    Args:
+        S: Square matrix
+
+    Returns:
+        Plotly figure with 3 subplots
+    """
+    S_inv = np.linalg.inv(S)
+    matrices = [S, S_inv, S @ S_inv]
+    titles = ['S', 'S⁻¹', 'S @ S⁻¹']
+
+    fig = make_subplots(rows=1, cols=3, subplot_titles=titles, horizontal_spacing=0.01)
+    for i, mat in enumerate(matrices):
+        fig.add_trace(
+            go.Heatmap(z=mat, colorscale='RdBu_r', showscale=(i == 2)),
+            row=1, col=i + 1
+        )
+        axis_suffix = "" if i == 0 else str(i + 1)
+        fig.update_xaxes(constrain='domain', row=1, col=i + 1)
+        fig.update_yaxes(scaleanchor=f'x{axis_suffix}', scaleratio=1,
+                         constrain='domain', row=1, col=i + 1)
+    fig.update_layout(height=350, width=800)
+    return fig
 
 
 def generate_2d_plots(model: nn.Module, k: int = 0) -> dict:
@@ -276,41 +389,11 @@ def generate_2d_plots(model: nn.Module, k: int = 0) -> dict:
     S = model.S.detach().cpu().numpy()
 
     # Frequency plot
-    fig_freq, ax = plt.subplots(figsize=(8, 8))
-    ax.scatter(om[:, 0], om[:, 1], s=100, alpha=0.6)
-    ax.set_xlabel('$\\omega_x$', fontsize=12)
-    ax.set_ylabel('$\\omega_y$', fontsize=12)
-    ax.set_title('Frequency vectors', fontsize=14)
-    ax.grid(True, alpha=0.3)
-    ax.axhline(y=0, color='k', linewidth=0.5)
-    ax.axvline(x=0, color='k', linewidth=0.5)
-    ax.set_aspect('equal')
-    fig_freq.tight_layout()
+    fig_freq = frequency_plot(om)
     log_figure(fig_freq, f"freq_plot_k{k}")
 
     # S analysis
-    fig_S, axes = plt.subplots(1, 3, figsize=(12, 3))
-
-    S_inv = np.linalg.inv(S)
-
-    im1 = axes[0].imshow(S, cmap='RdBu_r', aspect='equal')
-    axes[0].set_title('S')
-    axes[0].set_xlabel('Column')
-    axes[0].set_ylabel('Row')
-    plt.colorbar(im1, ax=axes[0])
-
-    im2 = axes[1].imshow(S_inv, cmap='RdBu_r', aspect='equal')
-    axes[1].set_title('S^-1')
-    axes[1].set_xlabel('Column')
-    axes[1].set_ylabel('Row')
-    plt.colorbar(im2, ax=axes[1])
-
-    im3 = axes[2].imshow(S @ S_inv, cmap='RdBu_r', aspect='equal')
-    axes[2].set_title('S @ S^-1')
-    axes[2].set_xlabel('Column')
-    axes[2].set_ylabel('Row')
-    plt.colorbar(im3, ax=axes[2])
-    fig_S.tight_layout()
+    fig_S = s_matrix_plot(S)
     log_figure(fig_S, f"S_analysis_k{k}")
 
     # Grid scores
