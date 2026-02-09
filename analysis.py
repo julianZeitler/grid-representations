@@ -1,5 +1,9 @@
+import tempfile
+
 import mlflow
+from mlflow.tracking import MlflowClient
 import numpy as np
+from omegaconf import OmegaConf
 import plotly.graph_objects as go
 from plotly.subplots import make_subplots
 import torch
@@ -261,8 +265,6 @@ def create_loss_plots_from_mlflow(k: int) -> None:
     Args:
         k: Run index to plot
     """
-    from mlflow.tracking import MlflowClient
-
     client = MlflowClient()
     active_run = mlflow.active_run()
     if active_run is None:
@@ -421,3 +423,391 @@ def generate_2d_plots(model: nn.Module, k: int = 0) -> dict:
     log_figure(neuron_lg_fig, f"neurons_large_k{k}")
 
     return scores
+
+
+def sweep_boxplot(
+    scores: dict[str, list[list[float]]],
+    x_values: list[float],
+    x_param: str,
+    log_x: bool,
+    base_key: str,
+    base_title: str,
+    n_neurons_str: str,
+    n_samples_str: str,
+) -> go.Figure:
+    """Create a boxplot figure for sweep score distributions.
+
+    Args:
+        scores: Dictionary mapping metric keys to list of score lists per x-value.
+        x_values: Sorted unique x-axis values.
+        x_param: Name of the x-axis parameter for labeling.
+        log_x: Whether to use logarithmic x-axis.
+        base_key: Base key identifier (e.g., 'sm_60').
+        base_title: Human-readable title for the scale/angle.
+        n_neurons_str: Formatted string for neuron count (e.g., " over 64 neurons,") or empty.
+        n_samples_str: Formatted string for sample count (e.g., " K=5") or empty.
+
+    Returns:
+        Plotly figure with boxplots.
+    """
+    mean_key = f"{base_key}_mean"
+    max_key = f"{base_key}_max"
+
+    fig = make_subplots(
+        rows=1, cols=2,
+        subplot_titles=[
+            f"Mean ({n_neurons_str}{n_samples_str})",
+            f"Max ({n_neurons_str}{n_samples_str})",
+        ]
+    )
+    fig.update_layout(title=f"Distribution of grid scores over runs<br>{base_title}")
+
+    for col, key in enumerate([mean_key, max_key], start=1):
+        for i, x_val in enumerate(x_values):
+            data = scores[key][i]
+            fig.add_trace(
+                go.Box(
+                    y=data,
+                    x=[x_val] * len(data),
+                    name=str(x_val),
+                    showlegend=False,
+                    marker_color="steelblue",
+                    boxpoints="outliers",
+                ),
+                row=1, col=col
+            )
+
+    if log_x:
+        fig.update_xaxes(
+            title_text=x_param,
+            type="log",
+            dtick=1,
+            minor=dict(dtick="D1", ticks="outside", showgrid=True, gridcolor="white"),
+            showgrid=True,
+            gridcolor="white",
+            exponentformat="power",
+        )
+    else:
+        fig.update_xaxes(title_text=x_param)
+    fig.update_yaxes(title_text="Grid score")
+    fig.update_layout(height=500, width=1000)
+
+    return fig
+
+
+def sweep_violin_plot(
+    scores: dict[str, list[list[float]]],
+    x_values: list[float],
+    x_param: str,
+    log_x: bool,
+    base_key: str,
+    base_title: str,
+    n_neurons_str: str,
+    n_samples_str: str,
+) -> go.Figure:
+    """Create a violin plot figure for sweep score distributions.
+
+    Args:
+        scores: Dictionary mapping metric keys to list of score lists per x-value.
+        x_values: Sorted unique x-axis values.
+        x_param: Name of the x-axis parameter for labeling.
+        log_x: Whether to use logarithmic x-axis.
+        base_key: Base key identifier (e.g., 'sm_60').
+        base_title: Human-readable title for the scale/angle.
+        n_neurons_str: Formatted string for neuron count (e.g., " over 64 neurons,") or empty.
+        n_samples_str: Formatted string for sample count (e.g., " K=5") or empty.
+
+    Returns:
+        Plotly figure with violin plots.
+    """
+    mean_key = f"{base_key}_mean"
+    max_key = f"{base_key}_max"
+
+    fig = make_subplots(
+        rows=1, cols=2,
+        subplot_titles=[
+            f"Mean ({n_neurons_str}{n_samples_str})",
+            f"Max ({n_neurons_str}{n_samples_str})",
+        ]
+    )
+    fig.update_layout(title=f"Distribution of grid scores over runs<br>{base_title}")
+
+    for col, key in enumerate([mean_key, max_key], start=1):
+        for i, x_val in enumerate(x_values):
+            data = scores[key][i]
+            fig.add_trace(
+                go.Violin(
+                    y=data,
+                    x=[x_val] * len(data),
+                    name=str(x_val),
+                    showlegend=False,
+                    fillcolor="steelblue",
+                    line_color="steelblue",
+                    box_visible=True,
+                    meanline_visible=True,
+                ),
+                row=1, col=col
+            )
+
+    if log_x:
+        fig.update_xaxes(
+            title_text=x_param,
+            type="log",
+            dtick=1,
+            minor=dict(dtick="D1", ticks="outside", showgrid=True, gridcolor="white"),
+            showgrid=True,
+            gridcolor="white",
+            exponentformat="power",
+        )
+    else:
+        fig.update_xaxes(title_text=x_param)
+    fig.update_yaxes(title_text="Grid score")
+    fig.update_layout(height=500, width=1000)
+
+    return fig
+
+
+def sweep_iqr_plot(
+    scores: dict[str, list[list[float]]],
+    x_values: list[float],
+    x_param: str,
+    log_x: bool,
+    base_key: str,
+    base_title: str,
+    n_neurons_str: str,
+    n_samples_str: str,
+) -> go.Figure:
+    """Create a quantile (IQR) plot figure for sweep score distributions.
+
+    Args:
+        scores: Dictionary mapping metric keys to list of score lists per x-value.
+        x_values: Sorted unique x-axis values.
+        x_param: Name of the x-axis parameter for labeling.
+        log_x: Whether to use logarithmic x-axis.
+        base_key: Base key identifier (e.g., 'sm_60').
+        base_title: Human-readable title for the scale/angle.
+        n_neurons_str: Formatted string for neuron count (e.g., " over 64 neurons,") or empty.
+        n_samples_str: Formatted string for sample count (e.g., " K=5") or empty.
+
+    Returns:
+        Plotly figure with median line and IQR shading.
+    """
+    mean_key = f"{base_key}_mean"
+    max_key = f"{base_key}_max"
+
+    fig = make_subplots(
+        rows=1, cols=2,
+        subplot_titles=[
+            f"Mean ({n_neurons_str}{n_samples_str})",
+            f"Max ({n_neurons_str}{n_samples_str})",
+        ]
+    )
+    fig.update_layout(title=f"Distribution of grid scores over runs<br>{base_title}")
+
+    for col, key in enumerate([mean_key, max_key], start=1):
+        data_array = np.array([scores[key][i] for i in range(len(x_values))])
+        medians = np.median(data_array, axis=1)
+        q1 = np.quantile(data_array, 0.25, axis=1)
+        q3 = np.quantile(data_array, 0.75, axis=1)
+
+        # IQR fill (upper bound, then lower bound reversed for fill)
+        fig.add_trace(
+            go.Scatter(
+                x=list(x_values) + list(x_values)[::-1],
+                y=list(q3) + list(q1)[::-1],
+                fill="toself",
+                fillcolor="rgba(70, 130, 180, 0.3)",
+                line=dict(color="rgba(255,255,255,0)"),
+                name="IQR (Q1-Q3)",
+                showlegend=(col == 1),
+            ),
+            row=1, col=col
+        )
+
+        # Median line
+        fig.add_trace(
+            go.Scatter(
+                x=x_values,
+                y=medians,
+                mode="lines",
+                line=dict(color="steelblue", width=2),
+                name="Median",
+                showlegend=(col == 1),
+            ),
+            row=1, col=col
+        )
+
+    if log_x:
+        fig.update_xaxes(
+            title_text=x_param,
+            type="log",
+            dtick=1,
+            minor=dict(dtick="D1", ticks="outside", showgrid=True, gridcolor="white"),
+            showgrid=True,
+            gridcolor="white",
+            exponentformat="power",
+        )
+    else:
+        fig.update_xaxes(title_text=x_param)
+    fig.update_yaxes(title_text="Grid score")
+    fig.update_layout(height=500, width=1000)
+
+    return fig
+
+
+def sweep_score_distributions_mlflow(
+    parent_run_id: str,
+    x_param: str = "data.seq_len",
+    log_x: bool = True,
+    tracking_uri: Optional[str] = "sqlite:///mlruns.db",
+) -> dict[str, go.Figure]:
+    """Generate distribution plots of grid scores across all child runs in a sweep.
+
+    Creates boxplots and median/IQR plots showing the distribution of mean and max
+    grid scores over all child runs for each scale/angle combination. Reads metrics
+    from MLflow and logs figures to the parent run.
+
+    Args:
+        parent_run_id: MLflow run ID of the parent sweep run.
+        x_param: Config parameter path for x-axis (e.g., 'data.seq_len').
+        log_x: Whether to use logarithmic x-axis scaling.
+        tracking_uri: MLflow tracking URI. If None, uses mlflow.get_tracking_uri().
+
+    Returns:
+        Dictionary mapping plot names to figure objects.
+    """
+    if tracking_uri:
+        mlflow.set_tracking_uri(tracking_uri)
+    client = MlflowClient()
+    figures: dict[str, go.Figure] = {}
+
+    # Get child runs
+    parent_run = client.get_run(parent_run_id)
+    experiment_id = parent_run.info.experiment_id
+
+    child_runs = client.search_runs(
+        experiment_ids=[experiment_id],
+        filter_string=f"tags.mlflow.parentRunId = '{parent_run_id}'",
+    )
+
+    if not child_runs:
+        print(f"No child runs found for parent {parent_run_id}")
+        return figures
+
+    # Collect data from child runs
+    # Structure: {x_value: {metric_key: [values across k]}}
+    data_by_x: dict[float, dict[str, list[float]]] = {}
+    n_neurons_str: str = ""
+    n_samples_str: str = ""
+
+    # Determine which metrics exist by finding a child run that has grid score metrics
+    metric_keys = []
+    for run in child_runs:
+        sample_metrics = run.data.metrics
+        metric_keys = [k for k in sample_metrics.keys() if "/" in k and any(
+            k.endswith(suffix) for suffix in ["_mean", "_max"]
+        )]
+        if metric_keys:
+            break
+
+    if not metric_keys:
+        print("No child runs have grid score metrics (_mean/_max)")
+        return figures
+
+    # Extract base metric names (without k prefix)
+    base_metric_names = set()
+    for mk in metric_keys:
+        # e.g., "k0/sm_60_mean" -> "sm_60_mean"
+        parts = mk.split("/")
+        if len(parts) == 2:
+            base_metric_names.add(parts[1])
+
+    for run in child_runs:
+        # Load config to get x-axis parameter value
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                config_path = client.download_artifacts(run.info.run_id, "config.yaml", tmpdir)
+                cfg = OmegaConf.load(config_path)
+                # Navigate nested config path (e.g., "data.seq_len")
+                x_value = float(OmegaConf.select(cfg, x_param))
+                # Get K and number of neurons from first successful config load
+                if not n_samples_str:
+                    k_val = OmegaConf.select(cfg, "training.K")
+                    if k_val is not None:
+                        n_samples_str = f" K={int(k_val)}"
+                    latent_size = OmegaConf.select(cfg, "model.latent_size")
+                    if latent_size is not None:
+                        n_neurons_str = f" over {int(latent_size)} neurons,"
+        except Exception as e:
+            print(f"Could not load config for run {run.info.run_id}: {e}")
+            continue
+
+        # Skip runs without grid score metrics
+        metrics = run.data.metrics
+        if not any(k.endswith("_mean") or k.endswith("_max") for k in metrics.keys()):
+            continue
+
+        if x_value not in data_by_x:
+            data_by_x[x_value] = {name: [] for name in base_metric_names}
+
+        # Collect metrics across all k values
+        for base_name in base_metric_names:
+            # Find all k values for this metric
+            k = 0
+            while True:
+                metric_key = f"k{k}/{base_name}"
+                if metric_key in metrics:
+                    data_by_x[x_value][base_name].append(metrics[metric_key])
+                    k += 1
+                else:
+                    break
+
+    if not data_by_x:
+        print("No valid data collected from child runs")
+        return figures
+
+    # Sort x values and restructure data for plotting
+    x_values = sorted(data_by_x.keys())
+
+    # Restructure: {metric_key: [list_of_values_at_x0, list_of_values_at_x1, ...]}
+    scores: dict[str, list[list[float]]] = {}
+    for base_name in base_metric_names:
+        scores[base_name] = [data_by_x[x][base_name] for x in x_values]
+
+    # Find unique base keys for grouping (e.g., 'sm_60', 'md_60')
+    base_keys = sorted(set(
+        "_".join(name.split("_")[:2]) for name in base_metric_names
+        if name.endswith("_mean") or name.endswith("_max")
+    ))
+
+    size_map = {"sm": "Small", "md": "Medium", "lg": "Large"}
+
+    # Generate plots for each base key
+    with mlflow.start_run(run_id=parent_run_id):
+        for base_key in base_keys:
+            mean_key = f"{base_key}_mean"
+            max_key = f"{base_key}_max"
+
+            if mean_key not in scores or max_key not in scores:
+                continue
+
+            size, angle = base_key.split("_")
+            base_title = f"{size_map.get(size, size)} ratemap, {angle}° angle"
+
+            # Boxplot
+            fig_box = sweep_boxplot(scores, x_values, x_param, log_x, base_key, base_title, n_neurons_str, n_samples_str)
+            log_figure(fig_box, f"sweep_boxplot_{base_key}")
+            figures[f"boxplot_{base_key}"] = fig_box
+
+            # Violin plot
+            fig_violin = sweep_violin_plot(scores, x_values, x_param, log_x, base_key, base_title, n_neurons_str, n_samples_str)
+            log_figure(fig_violin, f"sweep_violin_{base_key}")
+            figures[f"violin_{base_key}"] = fig_violin
+
+            # Quantile plot
+            fig_iqr = sweep_iqr_plot(scores, x_values, x_param, log_x, base_key, base_title, n_neurons_str, n_samples_str)
+            log_figure(fig_iqr, f"sweep_quantile_{base_key}")
+            figures[f"quantile_{base_key}"] = fig_iqr
+
+    print(f"Sweep score distribution plots logged to MLflow for run {parent_run_id}")
+    return figures
