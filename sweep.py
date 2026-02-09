@@ -1,7 +1,9 @@
+import argparse
 import itertools
 import os
 
 import mlflow
+from mlflow.tracking import MlflowClient
 from hydra import compose, initialize_config_dir
 from hydra.core.global_hydra import GlobalHydra
 
@@ -75,8 +77,33 @@ def generate_sweep_configs():
             yield None, params
 
 
+def get_child_run_ids(parent_run_id: str) -> dict[str, str]:
+    """Fetch child runs and return a mapping of run_name to run_id."""
+    client = MlflowClient()
+    experiment = mlflow.get_experiment_by_name("grid-representations")
+    if experiment is None:
+        return {}
+    child_runs = client.search_runs(
+        experiment_ids=[experiment.experiment_id],
+        filter_string=f"tags.mlflow.parentRunId = '{parent_run_id}'"
+    )
+    return {
+        run.info.run_name: run.info.run_id
+        for run in child_runs
+        if run.info.run_name is not None
+    }
+
+
 if __name__ == "__main__":
-    with mlflow.start_run(run_name=EXPERIMENT_NAME) as parent:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--continue-id", type=str, default=None, help="Parent run ID to continue from")
+    args = parser.parse_args()
+
+    child_run_ids: dict[str, str] = {}
+    if args.continue_id:
+        child_run_ids = get_child_run_ids(args.continue_id)
+
+    with mlflow.start_run(run_id=args.continue_id, run_name=EXPERIMENT_NAME) as parent:
         for experiment, params in generate_sweep_configs():
             GlobalHydra.instance().clear()
 
@@ -85,9 +112,11 @@ if __name__ == "__main__":
                 cfg = compose(config_name="config", overrides=overrides)
                 run_name = make_run_name(experiment, params)
 
-                with mlflow.start_run(run_name=run_name, nested=True):
+                continue_id = child_run_ids.get(run_name)
+
+                with mlflow.start_run(run_id=continue_id, run_name=run_name, nested=True):
                     mlflow.set_tag("experiment", experiment or "default")
                     for key, value in params.items():
                         mlflow.set_tag(f"param.{key}", value)
 
-                    train(cfg)
+                    train(cfg, continue_id=continue_id)

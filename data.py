@@ -17,6 +17,7 @@ from matplotlib.patches import Rectangle
 from numpy.typing import NDArray
 from torch.utils.data import Dataset
 from torch.utils.data.dataloader import default_collate
+from omegaconf import DictConfig
 
 def make_collate_fn(device: torch.device):
     """Create a collate function that reshapes shifted trajectories and moves to device.
@@ -32,7 +33,11 @@ def make_collate_fn(device: torch.device):
         B, n_shift, L, d = shift.shape
         shift = shift.reshape(B * n_shift, L, d)
         return normal.to(device), shift.to(device)
-    return collate_fn 
+    return collate_fn
+
+
+def get_dataset_name(cfg: DictConfig) -> str:
+    return f"dim_{cfg.dim}_box_{cfg.box_width}x{cfg.box_height}_seq_len_{cfg.seq_len}_n_shift_{cfg.n_shift}_sigma_shift_{cfg.sigma_shift}"
 
 
 class TrajectoryDataset(Dataset):
@@ -453,7 +458,7 @@ class TrajectoryGenerator:
 
         # Create time-based colors
         t = np.linspace(0, 1, len(segments))
-        lc = LineCollection(segments, cmap=cmap, norm=Normalize(0, 1))
+        lc = LineCollection(list(segments), cmap=cmap, norm=Normalize(0, 1))
         lc.set_array(t)
         lc.set_linewidth(2)
         ax.add_collection(lc)
@@ -527,7 +532,7 @@ class TrajectoryGenerator:
                 points = traj.reshape(-1, 1, 2)
                 segments = np.concatenate([points[:-1], points[1:]], axis=1)
 
-                lc = LineCollection(segments, cmap='viridis', linewidth=2)
+                lc = LineCollection(list(segments), cmap='viridis', linewidth=2)
                 lc.set_array(np.linspace(0, 1, sequence_length - 1))
                 ax.add_collection(lc)
 
