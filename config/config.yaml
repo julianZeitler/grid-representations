@@ -17,10 +17,10 @@ model:
   om_init_scale: 2
 
 training:
-  epochs: 150
+  epochs: 500
   train_iterations: 10
   val_iterations: 1
-  K: 10
+  K: 5
   batch_size: 1
   vary_seed: true
   vary_data: false

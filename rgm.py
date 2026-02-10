@@ -112,25 +112,6 @@ class ActionableRGM(nn.Module):
 
         return T
 
-    def step(
-        self,
-        x: torch.Tensor,
-        z: torch.Tensor,
-    ) -> torch.Tensor:
-        """
-        Single step transition function.
-
-        Args:
-            x: Input tensor of shape (batch, input_size)
-            z: Latent state tensor of shape (batch, latent_size)
-
-        Returns:
-            New latent state of shape (batch, latent_size)
-        """
-        T = self.get_T(x)
-
-        return torch.einsum('bij,bj->bi', T, z)
-
     def forward(
         self,
         input: torch.Tensor,
@@ -152,7 +133,9 @@ class ActionableRGM(nn.Module):
         if z0 is None:
             z0 = self.z0
 
-        z = z0.unsqueeze(0).expand(batch_size, -1)  # (batch, latent_size)
+        z0_activated = torch.nn.functional.softplus(z0)
+        z0_activated = z0_activated / torch.linalg.norm(z0_activated)
+        z = z0_activated.unsqueeze(0).expand(batch_size, -1)  # (batch, latent_size)
 
         # Compute all transformation matrices at once: (batch, seq_len, latent_size, latent_size)
         T_all = self.get_T(input)

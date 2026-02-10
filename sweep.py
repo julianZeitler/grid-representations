@@ -27,7 +27,7 @@ experiments = [
     "seq_100",
     "seq_200",
     "seq_500",
-    "seq_1000",
+    # "seq_1000",
 ]
 
 # Define parameter grid for outer product sweeps (optional)

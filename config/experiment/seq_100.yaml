@@ -3,3 +3,4 @@ data:
   seq_len: 100
 training:
   batch_size: 10
+  epochs: 500
