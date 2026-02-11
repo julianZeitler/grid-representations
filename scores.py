@@ -193,7 +193,7 @@ class GridScorer(object):
     best_score = -1
     best_labels = np.zeros(len(sacs), dtype=int)
 
-    for m in range(1, max_m + 1):
+    for m in range(2, max_m + 1):
       sc = SpectralClustering(n_clusters=m, affinity="precomputed", random_state=42)
       labels = sc.fit_predict(similarity_matrix)
       score = silhouette_score(distance_matrix, labels, metric="precomputed")
@@ -203,7 +203,7 @@ class GridScorer(object):
         best_m = m
         best_labels = labels
 
-    print(f"Optimal clusters found: {best_m} (Score: {best_score:.3f})")
+    print(f"Found {best_m} Modules (Score: {best_score:.3f})")
 
     return best_labels, similarity_matrix
 

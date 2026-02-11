@@ -11,7 +11,8 @@ from tqdm import tqdm
 from typing import Optional
 from numpy.typing import NDArray
 from sklearn.decomposition import PCA
-import pacmap
+import umap
+import logging
 
 from scores import GridScorer
 from data import TrajectoryGenerator
@@ -162,16 +163,16 @@ def manifold(
         width=800,
     )
 
-    reducer = pacmap.PaCMAP(
+    reducer = umap.UMAP(
         n_components=3,
-        n_neighbors=1000,
-        distance='cosine',
-        random_state=42,
+        metric='cosine',
+        n_neighbors=500,
+        min_dist=0.8,
+        init='spectral',
+        n_jobs=24
     )
 
     embedding = reducer.fit_transform(pcs)
-    if not embedding:
-        return
 
     # Color by 2D position in original environment
     pos_normalized = (positions - positions.min(axis=0)) / (positions.max(axis=0) - positions.min(axis=0))
@@ -415,8 +416,12 @@ def module_ratemaps_plot(
                 showscale=False,
             )
             fig.add_trace(heatmap, row=row, col=col)
+
+            axis_idx = (row - 1) * n_cols + col
+            axis_suffix = "" if axis_idx == 1 else str(axis_idx)
             fig.update_xaxes(showticklabels=False, showgrid=False, constrain='domain', row=row, col=col)
-            fig.update_yaxes(showticklabels=False, showgrid=False, constrain='domain', row=row, col=col)
+            fig.update_yaxes(showticklabels=False, showgrid=False, scaleanchor=f'x{axis_suffix}',
+                             scaleratio=1, constrain='domain', row=row, col=col)
 
         # Add module label with average score on the left
         module_y = 1 - (current_row - 0.5) / total_rows
@@ -425,7 +430,7 @@ def module_ratemaps_plot(
             xref='paper', yref='paper',
             text=f'<b>Module {m}</b><br>Avg: {avg_score:.3f}',
             showarrow=False,
-            font=dict(size=10),
+            font=dict(size=14),
             xanchor='right',
             align='right',
         )
@@ -436,13 +441,15 @@ def module_ratemaps_plot(
         height=120 * total_rows,
         width=100 * n_cols + 100,
         showlegend=False,
-        margin=dict(l=80),
+        margin=dict(l=120),
     )
     return fig
 
 
 def log_figure(fig: go.Figure, name: str) -> None:
     """Log a plotly figure to MLflow in both PNG and HTML formats."""
+    for logger_name in ('kaleido', 'choreographer'):
+        logging.getLogger(logger_name).setLevel(logging.WARNING)
     mlflow.log_figure(fig, f"figures/{name}.png")
     mlflow.log_figure(fig, f"figures/{name}.html")
 
@@ -629,9 +636,10 @@ def generate_2d_plots(model: nn.Module, k: int = 0) -> dict:
 
     # Generate trajectory data for manifold analysis
     generator = TrajectoryGenerator()
-    data = torch.tensor(generator.generate_trajectory(2, 2, 1000, 100), device=next(model.parameters()).device)
+    data = torch.tensor(generator.generate_trajectory(2, 2, 1000, 100), dtype=torch.float32, device=next(model.parameters()).device)
     positions = data.detach().cpu().numpy().reshape(-1, 2)
-    representations = model(data).detach().cpu().numpy()
+    representations, _ = model(data)
+    representations = representations.detach().cpu().numpy()
     B, L, D = representations.shape
     representations = representations.reshape(B * L, D)
 
