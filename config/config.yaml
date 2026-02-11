@@ -17,7 +17,7 @@ model:
   om_init_scale: 2
 
 training:
-  epochs: 500
+  epochs: 250
   train_iterations: 10
   val_iterations: 1
   K: 5

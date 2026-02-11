@@ -20,11 +20,16 @@ from __future__ import absolute_import
 from __future__ import division
 from __future__ import print_function
 
+from typing import Sequence
+
 import math
+from numpy.typing import NDArray
 import matplotlib.pyplot as plt
 import numpy as np
 import scipy.signal
 import scipy.ndimage as ndimage
+from sklearn.cluster import SpectralClustering
+from sklearn.metrics import silhouette_score
 
 
 def circle_mask(size, radius, in_val=1.0, out_val=0.0):
@@ -176,6 +181,32 @@ class GridScorer(object):
 
     return (scores_60[max_60_ind], scores_90[max_90_ind],
             self._masks[max_60_ind][1], self._masks[max_90_ind][1], sac, max_60_ind)
+  
+  def get_modules(self, sacs: Sequence[NDArray[np.floating]], max_m: int = 10) -> tuple[NDArray[np.intp], NDArray[np.floating]]:
+    flattened_sacs = np.array([sac.flatten() for sac in sacs])
+
+    similarity_matrix = np.corrcoef(flattened_sacs)
+    similarity_matrix = np.nan_to_num(similarity_matrix)
+    distance_matrix = 1 - similarity_matrix
+
+    best_m = 0
+    best_score = -1
+    best_labels = np.zeros(len(sacs), dtype=int)
+
+    for m in range(1, max_m + 1):
+      sc = SpectralClustering(n_clusters=m, affinity="precomputed", random_state=42)
+      labels = sc.fit_predict(similarity_matrix)
+      score = silhouette_score(distance_matrix, labels, metric="precomputed")
+
+      if score > best_score:
+        best_score = score
+        best_m = m
+        best_labels = labels
+
+    print(f"Optimal clusters found: {best_m} (Score: {best_score:.3f})")
+
+    return best_labels, similarity_matrix
+
 
   def plot_ratemap(self, ratemap, ax=None, title=None, *args, **kwargs):  # pylint: disable=keyword-arg-before-vararg
     """Plot ratemaps."""

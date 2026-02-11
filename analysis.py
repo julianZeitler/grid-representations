@@ -1,5 +1,4 @@
 import tempfile
-
 import mlflow
 from mlflow.tracking import MlflowClient
 import numpy as np
@@ -10,8 +9,12 @@ import torch
 import torch.nn as nn
 from tqdm import tqdm
 from typing import Optional
+from numpy.typing import NDArray
+from sklearn.decomposition import PCA
+import pacmap
 
 from scores import GridScorer
+from data import TrajectoryGenerator
 
 
 @torch.no_grad()
@@ -112,6 +115,92 @@ def quantitative_analysis(Vs: list[np.ndarray], widths: tuple, res: int = 70) ->
     fig_score.update_layout(height=500, width=1200, showlegend=False)
     return fig_score, scores
 
+def manifold(
+    positions: NDArray[np.floating],
+    representations: NDArray[np.floating],
+    m: int
+) -> tuple[go.Figure, go.Figure] | None:
+    """Compute PCA and PaCMAP embedding of neural representations.
+
+    Args:
+        positions: 2D positions in the environment, shape (N, 2).
+        representations: Neural activations at each position, shape (N, Dm)
+            where D is the latent dimension.
+        m: Module index
+
+    Returns:
+        Tuple of (manifold_fig, scree_fig) where manifold_fig is a 3D scatter
+        plot of the PaCMAP embedding colored by 2D position, and scree_fig
+        shows the PCA explained variance. Returns None if embedding fails.
+    """
+    pca = PCA(n_components=0.95)
+    pcs = pca.fit_transform(representations)
+
+    # Scree plot
+    n_components = len(pca.explained_variance_ratio_)
+    pc_numbers = list(range(1, n_components + 1))
+    scree_fig = go.Figure()
+    scree_fig.add_trace(go.Bar(
+        x=pc_numbers,
+        y=pca.explained_variance_ratio_ * 100,
+        name='Individual',
+        opacity=0.7,
+    ))
+    scree_fig.add_trace(go.Scatter(
+        x=pc_numbers,
+        y=np.cumsum(pca.explained_variance_ratio_) * 100,
+        mode='lines+markers',
+        name='Cumulative',
+        marker=dict(color='red'),
+        line=dict(color='red'),
+    ))
+    scree_fig.update_layout(
+        title=f'Scree Plot - Module {m} ({n_components} components)',
+        xaxis_title='Principal Component',
+        yaxis_title='Variance Explained (%)',
+        height=500,
+        width=800,
+    )
+
+    reducer = pacmap.PaCMAP(
+        n_components=3,
+        n_neighbors=1000,
+        distance='cosine',
+        random_state=42,
+    )
+
+    embedding = reducer.fit_transform(pcs)
+    if not embedding:
+        return
+
+    # Color by 2D position in original environment
+    pos_normalized = (positions - positions.min(axis=0)) / (positions.max(axis=0) - positions.min(axis=0))
+    pos_colors = np.zeros((len(positions), 3))
+    pos_colors[:, 0] = pos_normalized[:, 0]  # x -> red
+    pos_colors[:, 1] = pos_normalized[:, 1]  # y -> green
+    pos_colors[:, 2] = 0.5  # constant blue
+
+    manifold_fig = go.Figure(
+        data=[go.Scatter3d(
+            x=embedding[:, 0],
+            y=embedding[:, 1],
+            z=embedding[:, 2],
+            mode='markers',
+            marker=dict(
+                size=2,
+                color=['rgb({},{},{})'.format(int(r*255), int(g*255), int(b*255)) 
+                    for r, g, b in pos_colors],
+                opacity=0.6
+            )
+        )]
+    )
+
+    manifold_fig.update_layout(
+        title=f"Manifold Embedding (colored by 2D position) - Module {m} ({n_components} components)"
+    )
+
+    return manifold_fig, scree_fig
+
 
 def loss_plots(
     train_losses: dict[str, np.ndarray],
@@ -148,8 +237,7 @@ def loss_plots(
         train_data = train_losses[key]
         x_train = list(range(len(train_data)))
 
-        has_val = val_losses is not None and key in val_losses
-        show_in_legend = counter == 0 and has_val
+        show_in_legend = counter == 0 and val_losses is not None and key in val_losses
 
         row = counter // 2 + 1
         col = counter % 2 + 1
@@ -160,7 +248,7 @@ def loss_plots(
             row=row, col=col
         )
 
-        if has_val:
+        if val_losses is not None and key in val_losses:
             val_data = val_losses[key]
             n_val = len(val_data)
             val_x = np.linspace(0, n_train - 1, n_val).tolist()
@@ -216,7 +304,7 @@ def loss_plots(
     return fig
 
 
-def neuron_plotter_2d(V: np.ndarray, res: int, scores: np.ndarray = None) -> go.Figure:
+def neuron_plotter_2d(V: np.ndarray, res: int, scores: Optional[np.ndarray] = None) -> go.Figure:
     """Plot individual neuron ratemaps.
 
     Args:
@@ -250,6 +338,106 @@ def neuron_plotter_2d(V: np.ndarray, res: int, scores: np.ndarray = None) -> go.
         fig.update_yaxes(showticklabels=False, showgrid=False, scaleanchor=f'x{axis_suffix}',
                          scaleratio=1, constrain='domain', row=row, col=col)
     fig.update_layout(height=800, width=800)
+    return fig
+
+
+def module_ratemaps_plot(
+    V: np.ndarray,
+    res: int,
+    scores: np.ndarray,
+    labels: NDArray[np.intp],
+    max_cols: int = 8,
+) -> go.Figure:
+    """Plot ratemaps organized by module with grid scores.
+
+    Args:
+        V: Ratemap array of shape (n_neurons, res*res).
+        res: Resolution of ratemaps.
+        scores: Grid scores for each neuron, shape (n_neurons,).
+        labels: Module assignment for each neuron, shape (n_neurons,).
+        max_cols: Maximum columns per module before wrapping.
+
+    Returns:
+        Figure with ratemaps arranged by module, each module having its own
+        2D grid that wraps after max_cols columns.
+    """
+    n_modules = int(max(labels)) + 1
+    module_indices = [np.where(labels == m)[0] for m in range(n_modules)]
+
+    # Calculate rows needed per module and total rows
+    rows_per_module = [int(np.ceil(len(idx) / max_cols)) for idx in module_indices]
+    total_rows = sum(rows_per_module)
+    n_cols = min(max_cols, max(len(idx) for idx in module_indices))
+
+    # Build subplot titles
+    subplot_titles = []
+    for m in range(n_modules):
+        n_neurons = len(module_indices[m])
+        module_rows = rows_per_module[m]
+        for i in range(module_rows * n_cols):
+            if i < n_neurons:
+                neuron_idx = module_indices[m][i]
+                subplot_titles.append(f'{scores[neuron_idx]:.2f}')
+            else:
+                subplot_titles.append('')
+
+    # Calculate row heights with spacing between modules
+    row_heights = []
+    for m in range(n_modules):
+        for _ in range(rows_per_module[m]):
+            row_heights.append(1)
+
+    fig = make_subplots(
+        rows=total_rows,
+        cols=n_cols,
+        subplot_titles=subplot_titles,
+        horizontal_spacing=0.005,
+        vertical_spacing=0.04,
+        row_heights=row_heights,
+    )
+
+    vmin, vmax = V.min(), V.max()
+
+    current_row = 1
+    for m in range(n_modules):
+        module_neuron_indices = module_indices[m]
+        module_scores = scores[module_neuron_indices]
+        avg_score = np.mean(module_scores)
+
+        for i, neuron_idx in enumerate(module_neuron_indices):
+            row = current_row + i // n_cols
+            col = i % n_cols + 1
+
+            heatmap = go.Heatmap(
+                z=np.reshape(V[neuron_idx, :], [res, res]),
+                zmin=vmin, zmax=vmax,
+                colorscale='Viridis',
+                showscale=False,
+            )
+            fig.add_trace(heatmap, row=row, col=col)
+            fig.update_xaxes(showticklabels=False, showgrid=False, constrain='domain', row=row, col=col)
+            fig.update_yaxes(showticklabels=False, showgrid=False, constrain='domain', row=row, col=col)
+
+        # Add module label with average score on the left
+        module_y = 1 - (current_row - 0.5) / total_rows
+        fig.add_annotation(
+            x=-0.02, y=module_y,
+            xref='paper', yref='paper',
+            text=f'<b>Module {m}</b><br>Avg: {avg_score:.3f}',
+            showarrow=False,
+            font=dict(size=10),
+            xanchor='right',
+            align='right',
+        )
+
+        current_row += rows_per_module[m]
+
+    fig.update_layout(
+        height=120 * total_rows,
+        width=100 * n_cols + 100,
+        showlegend=False,
+        margin=dict(l=80),
+    )
     return fig
 
 
@@ -387,8 +575,8 @@ def generate_2d_plots(model: nn.Module, k: int = 0) -> dict:
     model.eval()
 
     # Extract model parameters for visualization
-    om = model.om.detach().cpu().numpy()
-    S = model.S.detach().cpu().numpy()
+    om: np.ndarray = getattr(model, 'om').detach().cpu().numpy()
+    S: np.ndarray = getattr(model, 'S').detach().cpu().numpy()
 
     # Frequency plot
     fig_freq = frequency_plot(om)
@@ -422,6 +610,42 @@ def generate_2d_plots(model: nn.Module, k: int = 0) -> dict:
     neuron_lg_fig = neuron_plotter_2d(V_large, res, scores["lg_60"])
     log_figure(neuron_lg_fig, f"neurons_large_k{k}")
 
+    # Module extraction and manifold analysis using large ratemaps
+    large_width = widths[2]
+    coord_range = ((-large_width / 2, large_width / 2), (-large_width / 2, large_width / 2))
+    starts = [0.2] * 10
+    ends = np.linspace(0.4, 1.0, num=10)
+    masks_parameters = zip(starts, ends.tolist())
+    scorer = GridScorer(res, coord_range, masks_parameters)
+
+    # Compute SACs from large ratemaps
+    sacs = [scorer.calculate_sac(V_large[i, :].reshape(res, res)) for i in range(V_large.shape[0])]
+    labels, _ = scorer.get_modules(sacs, max_m=15)
+    n_modules = int(max(labels)) + 1
+
+    # Plot ratemaps organized by module
+    module_fig = module_ratemaps_plot(V_large, res, scores["lg_60"], labels)
+    log_figure(module_fig, f"module_ratemaps_k{k}")
+
+    # Generate trajectory data for manifold analysis
+    generator = TrajectoryGenerator()
+    data = torch.tensor(generator.generate_trajectory(2, 2, 1000, 100), device=next(model.parameters()).device)
+    positions = data.detach().cpu().numpy().reshape(-1, 2)
+    representations = model(data).detach().cpu().numpy()
+    B, L, D = representations.shape
+    representations = representations.reshape(B * L, D)
+
+    # Manifold analysis per module
+    for module_idx in range(n_modules):
+        module_mask = np.array(labels) == module_idx
+        module_representations = representations[:, module_mask]
+
+        result = manifold(positions, module_representations, module_idx)
+        if result is not None:
+            manifold_fig, scree_fig = result
+            log_figure(manifold_fig, f"manifold_module{module_idx}_k{k}")
+            log_figure(scree_fig, f"scree_module{module_idx}_k{k}")
+
     return scores
 
 
@@ -429,11 +653,11 @@ def sweep_boxplot(
     scores: dict[str, list[list[float]]],
     x_values: list[float],
     x_param: str,
-    log_x: bool,
     base_key: str,
     base_title: str,
     n_neurons_str: str,
     n_samples_str: str,
+    log_x: bool = False,
 ) -> go.Figure:
     """Create a boxplot figure for sweep score distributions.
 
@@ -499,11 +723,11 @@ def sweep_violin_plot(
     scores: dict[str, list[list[float]]],
     x_values: list[float],
     x_param: str,
-    log_x: bool,
     base_key: str,
     base_title: str,
     n_neurons_str: str,
     n_samples_str: str,
+    log_x: bool = False,
 ) -> go.Figure:
     """Create a violin plot figure for sweep score distributions.
 
@@ -571,11 +795,11 @@ def sweep_iqr_plot(
     scores: dict[str, list[list[float]]],
     x_values: list[float],
     x_param: str,
-    log_x: bool,
     base_key: str,
     base_title: str,
     n_neurons_str: str,
     n_samples_str: str,
+    log_x: bool = False,
 ) -> go.Figure:
     """Create a quantile (IQR) plot figure for sweep score distributions.
 
@@ -658,7 +882,7 @@ def sweep_iqr_plot(
 def sweep_score_distributions_mlflow(
     parent_run_id: str,
     x_param: str = "data.seq_len",
-    log_x: bool = True,
+    log_x: bool = False,
     tracking_uri: Optional[str] = "sqlite:///mlruns.db",
 ) -> dict[str, go.Figure]:
     """Generate distribution plots of grid scores across all child runs in a sweep.
@@ -795,17 +1019,17 @@ def sweep_score_distributions_mlflow(
             base_title = f"{size_map.get(size, size)} ratemap, {angle}° angle"
 
             # Boxplot
-            fig_box = sweep_boxplot(scores, x_values, x_param, log_x, base_key, base_title, n_neurons_str, n_samples_str)
+            fig_box = sweep_boxplot(scores, x_values, x_param, base_key, base_title, n_neurons_str, n_samples_str, log_x=log_x)
             log_figure(fig_box, f"sweep_boxplot_{base_key}")
             figures[f"boxplot_{base_key}"] = fig_box
 
             # Violin plot
-            fig_violin = sweep_violin_plot(scores, x_values, x_param, log_x, base_key, base_title, n_neurons_str, n_samples_str)
+            fig_violin = sweep_violin_plot(scores, x_values, x_param, base_key, base_title, n_neurons_str, n_samples_str, log_x=log_x)
             log_figure(fig_violin, f"sweep_violin_{base_key}")
             figures[f"violin_{base_key}"] = fig_violin
 
             # Quantile plot
-            fig_iqr = sweep_iqr_plot(scores, x_values, x_param, log_x, base_key, base_title, n_neurons_str, n_samples_str)
+            fig_iqr = sweep_iqr_plot(scores, x_values, x_param, base_key, base_title, n_neurons_str, n_samples_str, log_x=log_x)
             log_figure(fig_iqr, f"sweep_quantile_{base_key}")
             figures[f"quantile_{base_key}"] = fig_iqr
 
