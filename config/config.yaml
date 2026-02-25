@@ -2,7 +2,7 @@ defaults:
   - _self_
 
 data:
-  seq_len: 150
+  seq_len: 200
   dim: 2
   box_width: 2
   box_height: 2
@@ -17,11 +17,11 @@ model:
   om_init_scale: 2
 
 training:
-  epochs: 250
+  epochs: 400
   train_iterations: 10
   val_iterations: 1
   K: 5
-  batch_size: 1
+  batch_size: 5
   vary_seed: true
   vary_data: false
 
@@ -31,8 +31,8 @@ loss:
   sigma_theta: 0.5
   f: 1
   sep_scale: 100
-  causal: false
-  decay: null
+  causal: true
+  decay: 0.95
 
 regularization:
   positivity:
@@ -44,7 +44,7 @@ regularization:
   norm:
     _target_: schedulers.GECO
     lambda_init: 0.005
-    k: -2
+    k: -3
     alpha: 0.9
     gamma: 0.001
 

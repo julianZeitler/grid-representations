@@ -14,7 +14,7 @@ mlflow.set_experiment("grid-representations")
 
 config_dir = os.path.abspath("config")
 
-EXPERIMENT_NAME = "seq_len_sweep"
+EXPERIMENT_NAME = "decay"
 experiments = None
 param_grid = None
 
@@ -32,7 +32,7 @@ experiments = [
 
 # Define parameter grid for outer product sweeps (optional)
 # param_grid = {
-#     "regularization.norm.k": [-4, -2, -1, 1, 2],
+#     "regularization.positivity.gamma": [0.01, 0.02, 0.05, 0.1],
 # }
 
 

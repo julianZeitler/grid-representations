@@ -156,7 +156,7 @@ def train(cfg: DictConfig, continue_id: Optional[str] = None) -> None:
             generator = TrajectoryGenerator()
             generator.generate_dataset(
                 train_path,
-                num_sequences=5000000//cfg.data.seq_len,
+                num_sequences=10000000//cfg.data.seq_len,
                 sequence_length=cfg.data.seq_len,
                 box_width=cfg.data.box_width,
                 box_height=cfg.data.box_height,
@@ -169,7 +169,7 @@ def train(cfg: DictConfig, continue_id: Optional[str] = None) -> None:
             generator = TrajectoryGenerator()
             generator.generate_dataset(
                 val_path,
-                num_sequences=500000//cfg.data.seq_len,
+                num_sequences=1000000//cfg.data.seq_len,
                 sequence_length=cfg.data.seq_len,
                 box_width=cfg.data.box_width,
                 box_height=cfg.data.box_height,
