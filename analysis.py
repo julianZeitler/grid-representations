@@ -15,6 +15,18 @@ from sklearn.decomposition import PCA
 import umap
 import logging
 
+import matplotlib.cm as mpl_cm
+from matplotlib.figure import Figure as MplFigure
+
+
+def _mpl_colorscale(name: str, n: int = 16) -> list:
+    """Convert a matplotlib colormap to a Plotly colorscale."""
+    cmap = mpl_cm.get_cmap(name)
+    return [
+        [i / (n - 1), 'rgb({},{},{})'.format(int(r*255), int(g*255), int(b*255))]
+        for i, (r, g, b, _) in enumerate(cmap(np.linspace(0, 1, n)))
+    ]
+
 from scores import GridScorer
 from data import TrajectoryGenerator
 
@@ -131,12 +143,25 @@ def manifold_cloud(
     positions: NDArray[np.floating],
     m: int,
     n_components: int,
+    traj_idx: int = 0,
 ) -> go.Figure:
+    seq_len = positions.shape[1] if positions.ndim == 3 else None
+
+    positions = positions.reshape(-1, 2)
     pos_normalized = (positions - positions.min(axis=0)) / (positions.max(axis=0) - positions.min(axis=0))
-    pos_colors = np.zeros((len(positions), 3))
-    pos_colors[:, 0] = pos_normalized[:, 0]  # x -> red
-    pos_colors[:, 1] = pos_normalized[:, 1]  # y -> green
-    pos_colors[:, 2] = 0.5  # constant blue
+    # 2D teal-green colormap via bilinear interpolation across four corners
+    c00 = np.array([1.00, 1.00, 1.00])
+    c10 = np.array([0.00, 1.00, 0.00])
+    c01 = np.array([0.10, 0.00, 1.00])
+    c11 = np.array([0.00, 1.00, 1.00])
+    x = pos_normalized[:, 0:1]
+    y = pos_normalized[:, 1:2]
+    pos_colors = (
+        (1 - x) * (1 - y) * c00
+        + x       * (1 - y) * c10
+        + (1 - x) * y       * c01
+        + x       * y       * c11
+    )
 
     centered = embedding - embedding.mean(axis=0)
 
@@ -151,9 +176,34 @@ def manifold_cloud(
                 color=['rgb({},{},{})'.format(int(r*255), int(g*255), int(b*255))
                     for r, g, b in pos_colors],
                 opacity=0.6
-            )
+            ),
+            name='All points',
         )]
     )
+
+    if seq_len is not None:
+        start = traj_idx * seq_len
+        traj_emb = centered[start : start + seq_len]
+        fig.add_trace(go.Scatter3d(
+            x=traj_emb[:, 0],
+            y=traj_emb[:, 1],
+            z=traj_emb[:, 2],
+            mode='lines',
+            # marker=dict(
+            #     size=3,
+            #     color=np.arange(seq_len),
+            #     colorscale=_mpl_colorscale('autumn'),
+            #     colorbar=dict(title='Time step'),
+            #     opacity=1.0,
+            # ),
+            line=dict(
+                color=np.arange(seq_len),
+                colorscale=_mpl_colorscale('autumn'),
+                width=6,
+            ),
+            name=f'Trajectory {traj_idx}',
+        ))
+
     fig.update_layout(
         title=f"Manifold Embedding (colored by 2D position) - Module {m} ({n_components} components)"
     )
@@ -211,8 +261,9 @@ def manifold_slice(
 def manifold(
     positions: NDArray[np.floating],
     representations: NDArray[np.floating],
-    m: int
-) -> tuple[go.Figure, go.Figure, go.Figure, go.Figure, go.Figure, NDArray[np.floating], NDArray[np.floating]] | None:
+    m: int,
+    traj_idx: int = 0,
+) -> tuple[go.Figure, go.Figure, go.Figure, go.Figure, go.Figure, MplFigure, NDArray[np.floating], NDArray[np.floating]] | None:
     """Compute PCA and PaCMAP embedding of neural representations.
 
     Args:
@@ -268,12 +319,18 @@ def manifold(
 
     embedding: NDArray[np.floating] = reducer.fit_transform(pcs)
 
-    manifold_fig = manifold_cloud(embedding, positions, m, n_components)
+    manifold_fig = manifold_cloud(embedding, positions, m, n_components, traj_idx)
     slice_xy = manifold_slice(embedding, (0, 1), m, n_components)
     slice_xz = manifold_slice(embedding, (0, 2), m, n_components)
     slice_yz = manifold_slice(embedding, (1, 2), m, n_components)
 
-    return manifold_fig, scree_fig, slice_xy, slice_xz, slice_yz, positions, embedding
+    traj_fig, _ = TrajectoryGenerator().visualize_trajectory_time(
+        positions[traj_idx] if positions.ndim == 3 else positions,
+        title=f'Trajectory {traj_idx} - Module {m}',
+        background='colormap', cmap='Wistia'
+    )
+
+    return manifold_fig, scree_fig, slice_xy, slice_xz, slice_yz, traj_fig, positions, embedding
 
 
 def loss_plots(
@@ -641,6 +698,46 @@ def s_matrix_plot(S: np.ndarray) -> go.Figure:
     fig.update_layout(height=350, width=800)
     return fig
 
+def grid_type(
+    grid_scores_60: NDArray[np.floating],
+    grid_scores_90: NDArray[np.floating],
+    modules: NDArray[np.intp],
+) -> go.Figure:
+    n_modules = int(max(modules)) + 1
+    colors = [f'hsl({int(m * 360 / n_modules)}, 70%, 50%)' for m in range(n_modules)]
+
+    fig = go.Figure()
+
+    for m in range(n_modules):
+        mask = modules == m
+        fig.add_trace(go.Scatter(
+            x=grid_scores_90[mask],
+            y=grid_scores_60[mask],
+            mode='markers',
+            marker=dict(color=colors[m], size=5, opacity=0.7),
+            name=f'Module {m}',
+        ))
+
+    # Dashed diagonal
+    lo = min(grid_scores_90.min(), grid_scores_60.min())
+    hi = max(grid_scores_90.max(), grid_scores_60.max())
+    fig.add_trace(go.Scatter(
+        x=[lo, hi],
+        y=[lo, hi],
+        mode='lines',
+        line=dict(dash='dash', color='grey', width=1),
+        showlegend=False,
+    ))
+
+    fig.update_layout(
+        xaxis_title='Grid score (90°)',
+        yaxis_title='Grid score (60°)',
+        xaxis=dict(scaleanchor='y', scaleratio=1),
+        width=600,
+        height=600,
+    )
+    return fig
+
 
 def generate_2d_plots(model: nn.Module, k: int = 0, generate_manifold = False) -> dict:
     """Generate analysis plots for a trained 2D model.
@@ -717,13 +814,18 @@ def generate_2d_plots(model: nn.Module, k: int = 0, generate_manifold = False) -
     module_fig = module_ratemaps_plot(V_large, res, scores["lg_60"], labels)
     log_figure(module_fig, f"module_ratemaps_k{k}")
 
+    grid_type_fig = grid_type(scores["lg_60"], scores["lg_90"], np.array(labels))
+    log_figure(grid_type_fig, f"grid_type_k{k}")
+
     if not generate_manifold:
         return scores
 
     # Generate trajectory data for manifold analysis
     generator = TrajectoryGenerator()
-    data = torch.tensor(generator.generate_trajectory(2, 2, 1000, 100), dtype=torch.float32, device=next(model.parameters()).device)
-    positions = data.detach().cpu().numpy().reshape(-1, 2)
+    positions = generator.generate_trajectory(2, 2, 1000, 100)  # (B, L, 2), absolute
+    positions_shifted = np.roll(positions, 1, axis=1)
+    positions_shifted[:, 0, :] = 0
+    data = torch.tensor(positions - positions_shifted, dtype=torch.float32, device=next(model.parameters()).device)
     representations, _ = model(data)
     representations = representations.detach().cpu().numpy()
     B, L, D = representations.shape
@@ -736,12 +838,13 @@ def generate_2d_plots(model: nn.Module, k: int = 0, generate_manifold = False) -
 
         result = manifold(positions, module_representations, module_idx)
         if result is not None:
-            manifold_fig, scree_fig, slice_xy, slice_xz, slice_yz, module_positions, module_embedding = result
+            manifold_fig, scree_fig, slice_xy, slice_xz, slice_yz, traj_fig, module_positions, module_embedding = result
             log_figure(manifold_fig, f"manifold_module{module_idx}_k{k}")
             log_figure(scree_fig, f"scree_module{module_idx}_k{k}")
             log_figure(slice_xy, f"manifold_slice_xy_module{module_idx}_k{k}")
             log_figure(slice_xz, f"manifold_slice_xz_module{module_idx}_k{k}")
             log_figure(slice_yz, f"manifold_slice_yz_module{module_idx}_k{k}")
+            mlflow.log_figure(traj_fig, f"figures/trajectory_module{module_idx}_k{k}.png")
             with tempfile.TemporaryDirectory() as tmpdir:
                 pos_path = f"{tmpdir}/positions_module{module_idx}.npy"
                 emb_path = f"{tmpdir}/embedding_module{module_idx}.npy"

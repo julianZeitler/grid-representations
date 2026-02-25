@@ -434,6 +434,7 @@ class TrajectoryGenerator:
         title: str | None = None,
         figsize: tuple[int, int] = (8, 8),
         cmap: str = 'viridis',
+        background: str = 'grey',
         save_path: str | None = None,
     ) -> tuple[Figure, Axes]:
         """Visualize a single trajectory with color encoding time progression.
@@ -445,6 +446,9 @@ class TrajectoryGenerator:
             title: Plot title.
             figsize: Figure size as (width, height) tuple.
             cmap: Matplotlib colormap name for time encoding.
+            background: Box background style. 'grey' for a flat grey fill,
+                'colormap' for the 2D teal-green position colormap matching
+                the UMAP manifold plot.
             save_path: If provided, save figure to this path.
 
         Returns:
@@ -452,24 +456,48 @@ class TrajectoryGenerator:
         """
         fig, ax = plt.subplots(figsize=figsize)
 
+        # Draw box background
+        if background == 'colormap':
+            res = 256
+            xv, yv = np.meshgrid(np.linspace(0, 1, res), np.linspace(0, 1, res))
+            c00 = np.array([1.00, 1.00, 1.00])
+            c10 = np.array([0.00, 1.00, 0.00])
+            c01 = np.array([0.10, 0.00, 1.00])
+            c11 = np.array([0.00, 1.00, 1.00])
+            x = xv[:, :, np.newaxis]
+            y = yv[:, :, np.newaxis]
+            img = (
+                (1 - x) * (1 - y) * c00
+                + x       * (1 - y) * c10
+                + (1 - x) * y       * c01
+                + x       * y       * c11
+            )
+            ax.imshow(
+                img,
+                origin='lower',
+                extent=(-box_width / 2, box_width / 2, -box_height / 2, box_height / 2),
+                aspect='auto',
+                zorder=0,
+            )
+        else:
+            bg = Rectangle((-box_width / 2, -box_height / 2), box_width, box_height,
+                           facecolor='lightgrey', edgecolor='none', zorder=0)
+            ax.add_patch(bg)
+
         # Create line segments for LineCollection
         points = positions.reshape(-1, 1, 2)
         segments = np.concatenate([points[:-1], points[1:]], axis=1)
 
         # Create time-based colors
         t = np.linspace(0, 1, len(segments))
-        lc = LineCollection(list(segments), cmap=cmap, norm=Normalize(0, 1))
+        lc = LineCollection(list(segments), cmap=cmap, norm=Normalize(0, 1), zorder=2)
         lc.set_array(t)
         lc.set_linewidth(2)
         ax.add_collection(lc)
 
-        # Mark start and end points
-        ax.scatter(positions[0, 0], positions[0, 1], c='green', s=100, zorder=5, label='Start')
-        ax.scatter(positions[-1, 0], positions[-1, 1], c='red', s=100, zorder=5, label='End')
-
-        # Draw environment box
+        # Draw environment box border
         box = Rectangle((-box_width/2, -box_height/2), box_width, box_height,
-                        fill=False, edgecolor='black', linewidth=2)
+                        fill=False, edgecolor='black', linewidth=2, zorder=3)
         ax.add_patch(box)
 
         ax.set_xlim(-box_width/2 - 0.1, box_width/2 + 0.1)
