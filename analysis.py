@@ -1,3 +1,4 @@
+import os
 import tempfile
 import mlflow
 from mlflow.tracking import MlflowClient
@@ -111,16 +112,107 @@ def quantitative_analysis(Vs: list[np.ndarray], widths: tuple, res: int = 70) ->
         scores[f"{prefix}_90_max"] = np.max(score_90)
         scores[f"{prefix}_90_mean"] = np.mean(score_90)
 
+    # Determine pattern type (60 vs 90 degree) for each neuron by comparing max scores across scales
+    scores_60_all = np.stack([scores["sm_60"], scores["md_60"], scores["lg_60"]], axis=0)
+    scores_90_all = np.stack([scores["sm_90"], scores["md_90"], scores["lg_90"]], axis=0)
+    max_60 = np.max(scores_60_all, axis=0)
+    max_90 = np.max(scores_90_all, axis=0)
+    scores["pattern_type"] = np.where(max_90 > max_60, 90, 60)
+    scores["count_60"] = np.sum(scores["pattern_type"] == 60)
+    scores["count_90"] = np.sum(scores["pattern_type"] == 90)
+
     fig_score.update_xaxes(title_text="Grid score", range=[-2, 2])
     fig_score.update_yaxes(title_text="Count")
     fig_score.update_layout(height=500, width=1200, showlegend=False)
     return fig_score, scores
 
+def manifold_cloud(
+    embedding: NDArray[np.floating],
+    positions: NDArray[np.floating],
+    m: int,
+    n_components: int,
+) -> go.Figure:
+    pos_normalized = (positions - positions.min(axis=0)) / (positions.max(axis=0) - positions.min(axis=0))
+    pos_colors = np.zeros((len(positions), 3))
+    pos_colors[:, 0] = pos_normalized[:, 0]  # x -> red
+    pos_colors[:, 1] = pos_normalized[:, 1]  # y -> green
+    pos_colors[:, 2] = 0.5  # constant blue
+
+    centered = embedding - embedding.mean(axis=0)
+
+    fig = go.Figure(
+        data=[go.Scatter3d(
+            x=centered[:, 0],
+            y=centered[:, 1],
+            z=centered[:, 2],
+            mode='markers',
+            marker=dict(
+                size=2,
+                color=['rgb({},{},{})'.format(int(r*255), int(g*255), int(b*255))
+                    for r, g, b in pos_colors],
+                opacity=0.6
+            )
+        )]
+    )
+    fig.update_layout(
+        title=f"Manifold Embedding (colored by 2D position) - Module {m} ({n_components} components)"
+    )
+    return fig
+
+def manifold_slice(
+    embedding: NDArray[np.floating],
+    axes: tuple[int, int],
+    m: int,
+    n_components: int,
+    epsilon: float = 0.1,
+) -> go.Figure:
+    n_dims = embedding.shape[1]
+    assert all(0 <= ax < n_dims for ax in axes), f"axes {axes} out of range for embedding with {n_dims} dimensions"
+    assert axes[0] != axes[1], "axes must be distinct"
+
+    # Translate to center of mass
+    centered = embedding - embedding.mean(axis=0)
+
+    ax0, ax1 = axes
+    other_ax = next(i for i in range(n_dims) if i not in axes)
+
+    # Keep only points within epsilon of the slice plane
+    dist_to_plane = np.abs(centered[:, other_ax])
+    mask = dist_to_plane <= epsilon
+    sliced = centered[mask]
+    sliced_dist = dist_to_plane[mask]
+
+    # Monochrome: dark (0) at plane, light (255) at epsilon
+    brightness = (sliced_dist / epsilon * 220).astype(int)
+    colors = ['rgb({v},{v},{v})'.format(v=int(b)) for b in brightness]
+
+    fig = go.Figure(
+        data=[go.Scatter(
+            x=sliced[:, ax0],
+            y=sliced[:, ax1],
+            mode='markers',
+            marker=dict(
+                size=4,
+                color=colors,
+            ),
+        )]
+    )
+    axis_labels = ['x', 'y', 'z']
+    fig.update_layout(
+        title=f"Manifold Slice (axes {axis_labels[ax0]}/{axis_labels[ax1]}, ε={epsilon}) - Module {m} ({n_components} components)",
+        xaxis_title=f"{axis_labels[ax0]}",
+        yaxis_title=f"{axis_labels[ax1]}",
+        xaxis=dict(scaleanchor='y', scaleratio=1),
+        height=600,
+        width=600,
+    )
+    return fig
+
 def manifold(
     positions: NDArray[np.floating],
     representations: NDArray[np.floating],
     m: int
-) -> tuple[go.Figure, go.Figure] | None:
+) -> tuple[go.Figure, go.Figure, go.Figure, go.Figure, go.Figure, NDArray[np.floating], NDArray[np.floating]] | None:
     """Compute PCA and PaCMAP embedding of neural representations.
 
     Args:
@@ -130,9 +222,11 @@ def manifold(
         m: Module index
 
     Returns:
-        Tuple of (manifold_fig, scree_fig) where manifold_fig is a 3D scatter
-        plot of the PaCMAP embedding colored by 2D position, and scree_fig
-        shows the PCA explained variance. Returns None if embedding fails.
+        Tuple of (manifold_fig, scree_fig, slice_xy, slice_xz, slice_yz, positions, embedding)
+        where manifold_fig is a 3D scatter plot colored by 2D position, scree_fig shows
+        PCA explained variance, slice_xy/xz/yz are 2D slice plots for each plane,
+        positions are the input positions (N, 2), and embedding is the UMAP output (N, 3).
+        Returns None if embedding fails.
     """
     pca = PCA(n_components=0.95)
     pcs = pca.fit_transform(representations)
@@ -172,35 +266,14 @@ def manifold(
         n_jobs=24
     )
 
-    embedding = reducer.fit_transform(pcs)
+    embedding: NDArray[np.floating] = reducer.fit_transform(pcs)
 
-    # Color by 2D position in original environment
-    pos_normalized = (positions - positions.min(axis=0)) / (positions.max(axis=0) - positions.min(axis=0))
-    pos_colors = np.zeros((len(positions), 3))
-    pos_colors[:, 0] = pos_normalized[:, 0]  # x -> red
-    pos_colors[:, 1] = pos_normalized[:, 1]  # y -> green
-    pos_colors[:, 2] = 0.5  # constant blue
+    manifold_fig = manifold_cloud(embedding, positions, m, n_components)
+    slice_xy = manifold_slice(embedding, (0, 1), m, n_components)
+    slice_xz = manifold_slice(embedding, (0, 2), m, n_components)
+    slice_yz = manifold_slice(embedding, (1, 2), m, n_components)
 
-    manifold_fig = go.Figure(
-        data=[go.Scatter3d(
-            x=embedding[:, 0],
-            y=embedding[:, 1],
-            z=embedding[:, 2],
-            mode='markers',
-            marker=dict(
-                size=2,
-                color=['rgb({},{},{})'.format(int(r*255), int(g*255), int(b*255)) 
-                    for r, g, b in pos_colors],
-                opacity=0.6
-            )
-        )]
-    )
-
-    manifold_fig.update_layout(
-        title=f"Manifold Embedding (colored by 2D position) - Module {m} ({n_components} components)"
-    )
-
-    return manifold_fig, scree_fig
+    return manifold_fig, scree_fig, slice_xy, slice_xz, slice_yz, positions, embedding
 
 
 def loss_plots(
@@ -569,12 +642,13 @@ def s_matrix_plot(S: np.ndarray) -> go.Figure:
     return fig
 
 
-def generate_2d_plots(model: nn.Module, k: int = 0) -> dict:
+def generate_2d_plots(model: nn.Module, k: int = 0, generate_manifold = False) -> dict:
     """Generate analysis plots for a trained 2D model.
 
     Args:
         model: Trained ActionableRGM model
         k: Run index for labeling
+        generate_manifold: Whether to run manifold analysis or not
 
     Returns:
         Dictionary of scores
@@ -634,6 +708,9 @@ def generate_2d_plots(model: nn.Module, k: int = 0) -> dict:
     module_fig = module_ratemaps_plot(V_large, res, scores["lg_60"], labels)
     log_figure(module_fig, f"module_ratemaps_k{k}")
 
+    if not generate_manifold:
+        return scores
+
     # Generate trajectory data for manifold analysis
     generator = TrajectoryGenerator()
     data = torch.tensor(generator.generate_trajectory(2, 2, 1000, 100), dtype=torch.float32, device=next(model.parameters()).device)
@@ -650,9 +727,19 @@ def generate_2d_plots(model: nn.Module, k: int = 0) -> dict:
 
         result = manifold(positions, module_representations, module_idx)
         if result is not None:
-            manifold_fig, scree_fig = result
+            manifold_fig, scree_fig, slice_xy, slice_xz, slice_yz, module_positions, module_embedding = result
             log_figure(manifold_fig, f"manifold_module{module_idx}_k{k}")
             log_figure(scree_fig, f"scree_module{module_idx}_k{k}")
+            log_figure(slice_xy, f"manifold_slice_xy_module{module_idx}_k{k}")
+            log_figure(slice_xz, f"manifold_slice_xz_module{module_idx}_k{k}")
+            log_figure(slice_yz, f"manifold_slice_yz_module{module_idx}_k{k}")
+            with tempfile.TemporaryDirectory() as tmpdir:
+                pos_path = f"{tmpdir}/positions_module{module_idx}.npy"
+                emb_path = f"{tmpdir}/embedding_module{module_idx}.npy"
+                np.save(pos_path, module_positions)
+                np.save(emb_path, module_embedding)
+                mlflow.log_artifact(pos_path, artifact_path=f"manifold/k{k}")
+                mlflow.log_artifact(emb_path, artifact_path=f"manifold/k{k}")
 
     return scores
 
@@ -714,6 +801,7 @@ def sweep_boxplot(
             title_text=x_param,
             type="log",
             dtick=1,
+            ticks="outside",
             minor=dict(dtick="D1", ticks="outside", showgrid=True, gridcolor="white"),
             showgrid=True,
             gridcolor="white",
@@ -786,6 +874,7 @@ def sweep_violin_plot(
             title_text=x_param,
             type="log",
             dtick=1,
+            ticks="outside",
             minor=dict(dtick="D1", ticks="outside", showgrid=True, gridcolor="white"),
             showgrid=True,
             gridcolor="white",
@@ -874,6 +963,7 @@ def sweep_iqr_plot(
             title_text=x_param,
             type="log",
             dtick=1,
+            ticks="outside",
             minor=dict(dtick="D1", ticks="outside", showgrid=True, gridcolor="white"),
             showgrid=True,
             gridcolor="white",
