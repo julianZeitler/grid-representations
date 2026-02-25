@@ -682,14 +682,23 @@ def generate_2d_plots(model: nn.Module, k: int = 0, generate_manifold = False) -
             mlflow.log_metric(f"k{k}/{key}", value)
 
     # Neuron plots
-    neuron_sm_fig = neuron_plotter_2d(V_small, res, scores["sm_60"])
-    log_figure(neuron_sm_fig, f"neurons_small_k{k}")
+    neuron_sm_fig_60 = neuron_plotter_2d(V_small, res, scores["sm_60"])
+    log_figure(neuron_sm_fig_60, f"neurons_small_k{k}_scores_60")
 
-    neuron_md_fig = neuron_plotter_2d(V_medium, res, scores["md_60"])
-    log_figure(neuron_md_fig, f"neurons_medium_k{k}")
+    neuron_md_fig_60 = neuron_plotter_2d(V_medium, res, scores["md_60"])
+    log_figure(neuron_md_fig_60, f"neurons_medium_k{k}_scores_60")
 
-    neuron_lg_fig = neuron_plotter_2d(V_large, res, scores["lg_60"])
-    log_figure(neuron_lg_fig, f"neurons_large_k{k}")
+    neuron_lg_fig_60 = neuron_plotter_2d(V_large, res, scores["lg_60"])
+    log_figure(neuron_lg_fig_60, f"neurons_large_k{k}_scores_60")
+
+    neuron_sm_fig_90 = neuron_plotter_2d(V_small, res, scores["sm_90"])
+    log_figure(neuron_sm_fig_90, f"neurons_small_k{k}_scores_90")
+
+    neuron_md_fig_90 = neuron_plotter_2d(V_medium, res, scores["md_90"])
+    log_figure(neuron_md_fig_90, f"neurons_medium_k{k}_scores_90")
+
+    neuron_lg_fig_90 = neuron_plotter_2d(V_large, res, scores["lg_90"])
+    log_figure(neuron_lg_fig_90, f"neurons_large_k{k}_scores_90")
 
     # Module extraction and manifold analysis using large ratemaps
     large_width = widths[2]
