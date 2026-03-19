@@ -20,10 +20,10 @@ training:
   epochs: 400
   train_iterations: 10
   val_iterations: 1
-  K: 5
+  K: 10
   batch_size: 5
-  vary_seed: true
-  vary_data: false
+  vary_seed: false
+  vary_data: true
 
 loss:
   _target_: losses.total_sep_loss
@@ -60,3 +60,15 @@ convergence:
   patience: 100
   threshold: 0.1
   smoothing: 20
+
+can:
+  N: 4096
+  L: 8
+  embedding:
+    omega_MA: 32.0
+  stability:
+    omega_MAs: [8, 32, 128]
+    noise_levels: [0.1, 0.5, 0.7]
+    n_steps: 50
+    n_init_positions: 40
+    synaptic_noise: 1.0
