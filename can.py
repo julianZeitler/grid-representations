@@ -216,13 +216,13 @@ def add_synaptic_noise(W: torch.Tensor, noise_scale: float = 1.0) -> torch.Tenso
 # 4. Visualization & Demos
 # ============================================================================
 
-def demo_embedding(N: int, L: int, omega_MA: float):
+def demo_embedding(emb: SpatialEmbedding):
     """Demonstrate the spatial embedding and similarity kernel."""
     print("=" * 60)
     print("DEMO 1: Spatial Embedding and Similarity Kernel")
     print("=" * 60)
 
-    emb = SpatialEmbedding(N, L, omega_MA, freq_dist="gaussian")
+    N, L, omega_MA = emb.N, emb.L, emb.omega_MA
 
     # Show embedding for a few positions
     ps = torch.linspace(0, 1, 200)
@@ -271,9 +271,8 @@ def demo_embedding(N: int, L: int, omega_MA: float):
 
 
 def demo_attractor_stability(
-    N: int,
-    L: int,
-    omega_MAs: list,
+    embeddings: list,
+    weight_matrices: list,
     noise_levels: list,
     n_steps: int,
     n_init_positions: int,
@@ -288,12 +287,11 @@ def demo_attractor_stability(
     print("DEMO 2: Attractor Stability (Fig. 1f-i analog)")
     print("=" * 60)
 
-    fig, axes = plt.subplots(len(noise_levels), len(omega_MAs), figsize=(6 * len(omega_MAs), 4 * len(noise_levels)))
+    fig, axes = plt.subplots(len(noise_levels), len(embeddings), figsize=(6 * len(embeddings), 4 * len(noise_levels)))
 
-    for col, omega_MA in enumerate(omega_MAs):
-        print(f"\n  omega_MA = {omega_MA} ...")
-        emb = SpatialEmbedding(N, L, omega_MA, freq_dist="gaussian")
-        A = build_autoassociative_weights(emb, n_steps=300)
+    for col, (emb, A) in enumerate(zip(embeddings, weight_matrices)):
+        L = emb.L
+        print(f"\n  omega_MA = {emb.omega_MA} ...")
         W = add_synaptic_noise(A, noise_scale=synaptic_noise)
 
         # Zero within-block weights
@@ -325,7 +323,7 @@ def demo_attractor_stability(
 
             ax.set_ylim(-0.05, 1.05)
             if row == 0:
-                ax.set_title(f"ω_MA = {omega_MA} m⁻¹", fontsize=12)
+                ax.set_title(f"ω_MA = {emb.omega_MA} m⁻¹", fontsize=12)
             if col == 0:
                 ax.set_ylabel(f"noise = {noise}\nDecoded position (m)")
             if row == len(noise_levels) - 1:
@@ -337,7 +335,7 @@ def demo_attractor_stability(
     plt.close()
 
 
-def demo_energy_landscape(N: int, L: int, omega_MAs: list):
+def demo_energy_landscape(embeddings: list, weight_matrices: list):
     """
     Visualize the energy landscape E(p) along the line attractor.
     Shows the rough landscape with autocorrelation length ~1/(2*omega_MA).
@@ -346,13 +344,12 @@ def demo_energy_landscape(N: int, L: int, omega_MAs: list):
     print("DEMO 3: Energy Landscape")
     print("=" * 60)
 
-    fig, axes = plt.subplots(1, len(omega_MAs), figsize=(7 * len(omega_MAs), 5))
-    if len(omega_MAs) == 1:
+    fig, axes = plt.subplots(1, len(embeddings), figsize=(7 * len(embeddings), 5))
+    if len(embeddings) == 1:
         axes = [axes]
 
-    for idx, omega_MA in enumerate(omega_MAs):
-        emb = SpatialEmbedding(N, L, omega_MA, freq_dist="gaussian")
-        A = build_autoassociative_weights(emb, n_steps=400)
+    for idx, (emb, A) in enumerate(zip(embeddings, weight_matrices)):
+        omega_MA = emb.omega_MA
 
         # Compute E(p) = -x(p)^T A x(p) for many positions
         ps = torch.linspace(0.05, 0.95, 500)
@@ -403,18 +400,27 @@ def main(cfg: DictConfig) -> None:
 
     c = cfg.can
 
+    # Build embeddings and weight matrices once, shared across demos
+    emb_demo1 = SpatialEmbedding(c.N, c.L, c.embedding.omega_MA, freq_dist="gaussian")
+    embeddings = [
+        SpatialEmbedding(c.N, c.L, omega_MA, freq_dist="gaussian")
+        for omega_MA in c.stability.omega_MAs
+    ]
+    print("Building autoassociative weight matrices...")
+    weight_matrices = [build_autoassociative_weights(emb, n_steps=300) for emb in embeddings]
+
     with mlflow.start_run():
-        mlflow.log_dict(OmegaConf.to_container(cfg.can, resolve=True), "config.yaml")
-        demo_embedding(c.N, c.L, c.embedding.omega_MA)
+        mlflow.log_text(OmegaConf.to_yaml(cfg.can, resolve=True), "config.yaml")
+        demo_embedding(emb_demo1)
         demo_attractor_stability(
-            c.N, c.L,
-            list(c.stability.omega_MAs),
+            embeddings,
+            weight_matrices,
             list(c.stability.noise_levels),
             c.stability.n_steps,
             c.stability.n_init_positions,
             c.stability.synaptic_noise,
         )
-        demo_energy_landscape(c.N, c.L, list(c.stability.omega_MAs))
+        demo_energy_landscape(embeddings, weight_matrices)
 
     print("\n" + "=" * 60)
     print("All demos complete!")
