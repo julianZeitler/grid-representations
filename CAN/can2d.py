@@ -398,7 +398,7 @@ def demo_2d_stability(
 # Main
 # ============================================================================
 
-@hydra.main(version_base=None, config_path="config", config_name="config")
+@hydra.main(version_base=None, config_path="config", config_name="can2d")
 def main(cfg: DictConfig) -> None:
     mlflow.set_tracking_uri("sqlite:///mlruns.db")
     mlflow.set_experiment("can_2d")

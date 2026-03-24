@@ -1,0 +1,16 @@
+defaults:
+  - _self_
+
+can:
+  N: 4096
+  L: 8
+  stability:
+    omega_MAs: [8, 32, 128]
+    noise_levels: [0, 0.00001, 0.0001]
+    n_steps: 50
+    synaptic_noise: 0
+  embedding2d:
+    omega_MA: 32.0
+    n_weight_steps: 25   # per dimension; total = n_weight_steps^2 positions
+    n_vis_steps: 60      # grid resolution for visualizations
+    n_ratemaps: 16       # number of neuron ratemaps to plot

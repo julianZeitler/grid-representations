@@ -386,7 +386,7 @@ def demo_energy_landscape(embeddings: list, weight_matrices: list, temperature: 
 # Main
 # ============================================================================
 
-@hydra.main(version_base=None, config_path="config", config_name="config")
+@hydra.main(version_base=None, config_path="config", config_name="can_real")
 def main(cfg: DictConfig) -> None:
     mlflow.set_tracking_uri("sqlite:///mlruns.db")
     mlflow.set_experiment("can_real")

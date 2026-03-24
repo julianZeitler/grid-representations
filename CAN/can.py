@@ -505,7 +505,7 @@ def demo_energy_trajectories(
 # Main
 # ============================================================================
 
-@hydra.main(version_base=None, config_path="config", config_name="config")
+@hydra.main(version_base=None, config_path="config", config_name="can")
 def main(cfg: DictConfig) -> None:
     mlflow.set_tracking_uri("sqlite:///mlruns.db")
     mlflow.set_experiment("can")
