@@ -132,20 +132,24 @@ def build_autoassociative_weights(
     p_min: float = 0.0,
     p_max: float = 1.0,
     n_steps: int = 500,
+    zero_within_block: bool = True,
 ) -> torch.Tensor:
     """
     Construct the autoassociative weight matrix A (Eq. 3):
 
         A = integral_{p_min}^{p_max} x_bar(p) x_bar(p)^T dp
 
-    where x_bar(p) = x(p) - 1/L (mean-centered).
+    where x_bar(p) = x(p) - mean(x(p)) (empirically mean-centered).
     Computed via Riemann sum.
+
+    Args:
+        zero_within_block: If True, zero out within-block weights (appropriate
+            for block WTA dynamics). Set to False for global kWTA.
 
     Returns:
         A: (N, N) symmetric weight matrix
     """
     N = embedding.N
-    L = embedding.L
     dp = (p_max - p_min) / n_steps
 
     A = torch.zeros(N, N, device=embedding.device)
@@ -154,14 +158,19 @@ def build_autoassociative_weights(
         p = p_min + (i + 0.5) * dp
         p_t = torch.tensor(p, device=embedding.device)
         x = embedding.encode(p_t)  # (N,)
-        x_bar = x - 1.0 / L
+        x_bar = x - x.mean()
         A += torch.outer(x_bar, x_bar) * dp
 
-    # Zero out within-block weights (no self-connections within a module)
-    for m in range(embedding.M):
-        s = m * L
-        e = s + L
-        A[s:e, s:e] = 0.0
+    if zero_within_block:
+        # Zero out within-block weights (no self-connections within a module)
+        L = embedding.L
+        for m in range(embedding.M):
+            s = m * L
+            e = s + L
+            A[s:e, s:e] = 0.0
+    else:
+        # Always zero self-connections (diagonal)
+        A.fill_diagonal_(0.0)
 
     return A
 
@@ -183,6 +192,17 @@ def block_wta(z: torch.Tensor, L: int) -> torch.Tensor:
     out = torch.zeros_like(z_blocks)
     out[torch.arange(M, device=z.device), winners] = 1.0
     return out.view(N)
+
+
+def global_kwta(z: torch.Tensor, k: int) -> torch.Tensor:
+    """
+    Global k-winner-take-all activation function.
+    The k neurons with the highest input are set to 1; all others to 0.
+    """
+    topk_indices = torch.topk(z, k).indices
+    out = torch.zeros_like(z)
+    out[topk_indices] = 1.0
+    return out
 
 
 def add_neural_noise(z: torch.Tensor, L: int, bit_error_rate: float = 0.1) -> torch.Tensor:
@@ -277,11 +297,15 @@ def demo_attractor_stability(
     n_steps: int,
     n_init_positions: int,
     synaptic_noise: float,
+    wta_fn=None,
 ):
     """
     Demonstrate the resolution-stability advantage of multimodal codes.
     Initialize from multiple positions and observe drift behavior.
     Corresponds to Fig. 1f-i in the paper.
+
+    Args:
+        wta_fn: Callable(z) -> binary vector. Defaults to block_wta using emb.L.
     """
     print("=" * 60)
     print("DEMO 2: Attractor Stability (Fig. 1f-i analog)")
@@ -291,6 +315,7 @@ def demo_attractor_stability(
 
     for col, (emb, A) in enumerate(zip(embeddings, weight_matrices)):
         L = emb.L
+        _wta = wta_fn if wta_fn is not None else (lambda h: block_wta(h, L))
         print(f"\n  omega_MA = {emb.omega_MA} ...")
         W = add_synaptic_noise(A, noise_scale=synaptic_noise)
 
@@ -312,7 +337,7 @@ def demo_attractor_stability(
 
                 for t in range(n_steps):
                     h = W @ z
-                    z = block_wta(h, L)
+                    z = _wta(h)
                     z = add_neural_noise(z, L, noise)
                     if t % 5 == 0:
                         traj.append(emb.decode(z, (0, 1)).item())
@@ -382,6 +407,99 @@ def demo_energy_landscape(embeddings: list, weight_matrices: list):
     mlflow.log_figure(fig, "demo_energy_landscape.png")
     plt.close()
 
+def demo_energy_trajectories(
+    embeddings: list,
+    weight_matrices: list,
+    start_positions: list,
+    noise_levels: list,
+    n_steps: int,
+    synaptic_noise: float,
+    wta_fn=None,
+):
+    """
+    Visualize how network state evolves on the energy landscape from different
+    starting positions. For each omega_MA a separate figure is created with
+    rows = noise levels and columns = starting positions.
+
+    Each decoded position at every time step is overlaid as an opaque scatter
+    point on the energy curve.
+    """
+    print("=" * 60)
+    print("DEMO 4: Trajectories on Energy Landscape")
+    print("=" * 60)
+
+    ps_landscape = torch.linspace(0.05, 0.95, 500)
+
+    for emb, A in zip(embeddings, weight_matrices):
+        omega_MA = emb.omega_MA
+        L = emb.L
+        _wta = wta_fn if wta_fn is not None else (lambda h: block_wta(h, L))
+
+        W = add_synaptic_noise(A, noise_scale=synaptic_noise)
+        for m in range(emb.M):
+            s, e = m * L, (m + 1) * L
+            W[s:e, s:e] = 0.0
+
+        # Compute energy landscape once
+        energies = []
+        for p in ps_landscape:
+            x = emb.encode(p)
+            energies.append(-(x @ A @ x).item())
+        energies = np.array(energies)
+        energies = (energies - energies.mean()) / energies.std()
+
+        n_rows = len(noise_levels)
+        n_cols = len(start_positions)
+        fig, axes = plt.subplots(
+            n_rows, n_cols,
+            figsize=(4 * n_cols, 3 * n_rows),
+            sharex=True, sharey=True,
+        )
+        if n_rows == 1 and n_cols == 1:
+            axes = np.array([[axes]])
+        elif n_rows == 1:
+            axes = axes[np.newaxis, :]
+        elif n_cols == 1:
+            axes = axes[:, np.newaxis]
+
+        print(f"\n  omega_MA = {omega_MA} ...")
+        for row, noise in enumerate(noise_levels):
+            print(f"    noise = {noise} ...")
+            for col, p0 in enumerate(start_positions):
+                ax = axes[row, col]
+
+                ax.plot(ps_landscape.numpy(), energies, color="steelblue",
+                        linewidth=1.2, zorder=1)
+
+                z = emb.encode(torch.tensor(float(p0)))
+                decoded = [emb.decode(z, (0, 1)).item()]
+                for _ in range(n_steps):
+                    h = W @ z
+                    z = _wta(h)
+                    z = add_neural_noise(z, L, noise)
+                    decoded.append(emb.decode(z, (0, 1)).item())
+
+                p_arr = np.array(decoded)
+                e_arr = np.interp(p_arr, ps_landscape.numpy(), energies)
+
+                ax.scatter(p_arr, e_arr, s=18, color="tomato", alpha=0.3, zorder=2)
+                ax.axvline(x=float(p0), color="green", linewidth=0.8,
+                           linestyle="--", alpha=0.6)
+
+                if row == 0:
+                    ax.set_title(f"p₀ = {p0:.2f}", fontsize=10)
+                if col == 0:
+                    ax.set_ylabel(f"noise = {noise}\nE(p) (norm.)", fontsize=9)
+                if row == n_rows - 1:
+                    ax.set_xlabel("Position p (m)")
+
+        fig.suptitle(
+            f"Trajectories on energy landscape — ω_MA = {omega_MA} m⁻¹",
+            fontsize=12,
+        )
+        plt.tight_layout()
+        mlflow.log_figure(fig, f"demo_energy_trajectories_omega{omega_MA}.png")
+        plt.close()
 
 # ============================================================================
 # Main
@@ -406,12 +524,26 @@ def main(cfg: DictConfig) -> None:
         SpatialEmbedding(c.N, c.L, omega_MA, freq_dist="gaussian")
         for omega_MA in c.stability.omega_MAs
     ]
+    use_block_wta = OmegaConf.select(c, "wta", default="block") == "block"
+    zero_within_block = OmegaConf.select(c, "zero_within_block", default=True)
+
     print("Building autoassociative weight matrices...")
-    weight_matrices = [build_autoassociative_weights(emb, n_steps=300) for emb in embeddings]
+    weight_matrices = [
+        build_autoassociative_weights(emb, n_steps=300, zero_within_block=zero_within_block)
+        for emb in embeddings
+    ]
 
     with mlflow.start_run():
         mlflow.log_text(OmegaConf.to_yaml(cfg.can, resolve=True), "config.yaml")
         demo_embedding(emb_demo1)
+        if use_block_wta:
+            wta_fn = None  # demo will default to block_wta per embedding
+        else:
+            k = OmegaConf.select(c, "k", default=None)
+            if k is None:
+                k = c.N // c.L
+            wta_fn = lambda h: global_kwta(h, k)  # noqa: E731
+
         demo_attractor_stability(
             embeddings,
             weight_matrices,
@@ -419,8 +551,33 @@ def main(cfg: DictConfig) -> None:
             c.stability.n_steps,
             c.stability.n_init_positions,
             c.stability.synaptic_noise,
+            wta_fn=wta_fn,
         )
         demo_energy_landscape(embeddings, weight_matrices)
+
+        start_positions = list(OmegaConf.select(
+            c, "trajectories.start_positions",
+            default=[0.1, 0.3, 0.5, 0.7, 0.9],
+        ))
+        traj_omega_MAs = set(OmegaConf.select(
+            c, "trajectories.omega_MAs",
+            default=list(c.stability.omega_MAs),
+        ))
+        traj_embeddings = [emb for emb in embeddings if emb.omega_MA in traj_omega_MAs]
+        traj_weight_matrices = [A for emb, A in zip(embeddings, weight_matrices)
+                                 if emb.omega_MA in traj_omega_MAs]
+        demo_energy_trajectories(
+            traj_embeddings,
+            traj_weight_matrices,
+            start_positions=start_positions,
+            noise_levels=list(OmegaConf.select(
+                c, "trajectories.noise_levels",
+                default=list(c.stability.noise_levels),
+            )),
+            n_steps=c.stability.n_steps,
+            synaptic_noise=c.stability.synaptic_noise,
+            wta_fn=wta_fn,
+        )
 
     print("\n" + "=" * 60)
     print("All demos complete!")

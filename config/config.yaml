@@ -64,14 +64,22 @@ convergence:
 can:
   N: 4096
   L: 8
+  wta: block           # "block" for block_wta (uses L), "global" for global kWTA
+  k: null              # number of winners for global kWTA; defaults to N//L if null
+  zero_within_block: true  # zero within-block weights in A (independent of wta type)
+  temperature: 1
   embedding:
     omega_MA: 32.0
   stability:
     omega_MAs: [8, 32, 128]
-    noise_levels: [0.1, 0.5, 0.7]
+    noise_levels: [0, 0.00001, 0.0001]
     n_steps: 50
     n_init_positions: 40
-    synaptic_noise: 1.0
+    synaptic_noise: 0
+  trajectories:
+    start_positions: [1, 0.4, 0.7, 0.8]
+    noise_levels: [0, 0.00001, 0.0001]
+    omega_MAs: [8]
   embedding2d:
     omega_MA: 32.0
     n_weight_steps: 25   # per dimension; total = n_weight_steps^2 positions
