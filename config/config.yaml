@@ -20,10 +20,10 @@ training:
   epochs: 400
   train_iterations: 10
   val_iterations: 1
-  K: 10
+  K: 1
   batch_size: 5
   vary_seed: false
-  vary_data: true
+  vary_data: false
 
 loss:
   _target_: losses.total_sep_loss
