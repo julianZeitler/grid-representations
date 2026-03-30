@@ -1,0 +1,72 @@
+defaults:
+  - _self_
+
+# MLflow run ID to load the ActionableRGM from.
+exp_id: "f642b20826b842d8be9c07327ce3e458"
+# Iteration k whose model weights are loaded.
+k: 0
+
+box_width: 2.0
+box_height: 2.0
+
+# Number of 2D positions sampled uniformly to form the visited-state set.
+n_samples: 1000
+
+# Grid resolution for visualisations (n_vis_steps^2 total evaluations).
+n_vis_steps: 40
+
+# -----------------------------------------------------------------------
+# Position decoder z → x (trained with frozen encoder)
+# -----------------------------------------------------------------------
+decoder:
+  hidden_dim: 64
+  n_layers: 2
+  n_train: 50000
+  lr: 1.0e-3
+  batch_size: 256
+  n_epochs: 200
+  log_interval: 20
+  box_width: 4.0
+  box_height: 4.0
+
+# -----------------------------------------------------------------------
+# Denoising network g_θ architecture
+# -----------------------------------------------------------------------
+model:
+  hidden_dim: 64
+  n_layers: 2
+
+# -----------------------------------------------------------------------
+# Training: energy-volume objective
+#   L = ||z - g(z)||²  -  λ · log|det(I - J_g(z))|
+# -----------------------------------------------------------------------
+train:
+  n_epochs: 300
+  batch_size: 64
+  lr: 1.0e-3
+  lam: 0.1         # volume regularisation weight λ
+  grad_clip: 1.0   # max gradient norm (0 = disabled)
+  log_interval: 50
+
+# -----------------------------------------------------------------------
+# Demo: fixed-point iteration  z_{t+1} = g(z_t)
+# -----------------------------------------------------------------------
+iteration:
+  n_steps: 100     # number of GD steps per trajectory
+  n_init: 10       # number of random starting positions
+  alpha: 0.1       # gradient descent step size on E(z)
+
+# -----------------------------------------------------------------------
+# Demo: α sweep — GD step size on E(z)
+# -----------------------------------------------------------------------
+alpha_sweep:
+  alphas: [1e-8, 1e-5, 1e-3]
+  n_steps: 100
+  n_init: 5
+
+# -----------------------------------------------------------------------
+# Demo: λ sweep (trains separate g_θ for each λ)
+# -----------------------------------------------------------------------
+lambda_sweep:
+  lambdas: [0.0, 0.01, 0.1, 1.0]
+  n_epochs: 150    # shorter training for the sweep

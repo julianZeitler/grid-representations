@@ -1,0 +1,86 @@
+defaults:
+  - _self_
+
+exp_id: "f642b20826b842d8be9c07327ce3e458"
+k: 0
+
+box_width: 2.0
+box_height: 2.0
+
+n_samples: 1000
+n_vis_steps: 40
+
+# -----------------------------------------------------------------------
+# Position decoder z → x (trained with frozen encoder)
+# -----------------------------------------------------------------------
+decoder:
+  hidden_dim: 64
+  n_layers: 2
+  n_train: 50000
+  lr: 1.0e-3
+  batch_size: 256
+  n_epochs: 200
+  log_interval: 20
+  box_width: 4.0    # arena size for decoder training (can differ from main env)
+  box_height: 4.0
+
+# -----------------------------------------------------------------------
+# Energy network E_θ architecture
+# -----------------------------------------------------------------------
+model:
+  hidden_dim: 128
+  n_layers: 3
+
+# -----------------------------------------------------------------------
+# Training (Persistent Contrastive Divergence)
+# -----------------------------------------------------------------------
+train:
+  n_epochs: 1000
+  batch_size: 256
+  lr: 1.0e-4
+  grad_clip: 1.0
+  log_interval: 50
+
+# -----------------------------------------------------------------------
+# Contrastive divergence / Langevin sampler
+# -----------------------------------------------------------------------
+cd:
+  n_steps: 50          # Langevin steps per training iteration (PCD-k)
+  step_size: 0.05      # η_L — Langevin GD step size
+  noise_std_max: 0.5   # σ at epoch 0  (broad exploration)
+  noise_std_min: 0.1   # σ at final epoch (local refinement)
+  buffer_size: 1024    # number of persistent fantasy particles
+  lam_reg: 1           # λ_reg — energy regularization weight
+
+# -----------------------------------------------------------------------
+# Demo: α sweep — GD inference step size
+# -----------------------------------------------------------------------
+alpha_sweep:
+  alphas: [0.001, 0.01, 0.1, 1.0, 10, 100]
+  n_steps: 100
+  n_init: 5
+
+# -----------------------------------------------------------------------
+# Demo: Langevin fantasy particle visualisation
+# -----------------------------------------------------------------------
+langevin_vis:
+  n_particles: 200
+  n_steps: 100         # long chain to let particles settle
+
+# -----------------------------------------------------------------------
+# Shared sweep settings
+# -----------------------------------------------------------------------
+sweep:
+  n_epochs: 200        # shorter training for all parameter sweeps
+
+# -----------------------------------------------------------------------
+# Demo: λ_reg sweep — energy regularization strength
+# -----------------------------------------------------------------------
+lam_reg_sweep:
+  lam_regs: [0.1, 0.5, 1.0, 5.0]
+
+# -----------------------------------------------------------------------
+# Demo: Langevin noise_std sweep — exploration vs. exploitation
+# -----------------------------------------------------------------------
+noise_std_sweep:
+  noise_stds: [0.001, 0.005, 0.02, 0.1]

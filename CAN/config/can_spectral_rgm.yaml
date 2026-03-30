@@ -1,0 +1,56 @@
+defaults:
+  - _self_
+
+# MLflow run ID to load the ActionableRGM from.
+exp_id: "f642b20826b842d8be9c07327ce3e458"
+# Iteration k whose model weights are loaded.
+k: 0
+
+box_width: 2.0
+box_height: 2.0
+
+# Number of 2D positions sampled uniformly to form the visited-state set.
+n_samples: 1000
+
+# Grid resolution for visualisations (n_vis_steps^2 total evaluations).
+n_vis_steps: 40
+
+# -----------------------------------------------------------------------
+# Position decoder z → x (trained with frozen encoder)
+# -----------------------------------------------------------------------
+decoder:
+  hidden_dim: 64
+  n_layers: 2
+  n_train: 50000
+  lr: 1.0e-3
+  batch_size: 256
+  n_epochs: 200
+  log_interval: 20
+  box_width: 4.0
+  box_height: 4.0
+
+# -----------------------------------------------------------------------
+# Training: W = QΛQᵀ with spectral regularisation
+# -----------------------------------------------------------------------
+train:
+  n_epochs: 500
+  batch_size: 128
+  lr: 1.0e-3
+  lam_reg: 0.01        # regularisation weight λ_reg
+  reg_type: "logdet"   # "nuclear" or "logdet"
+  log_interval: 50
+
+# -----------------------------------------------------------------------
+# Demo: α sweep — GD step size on E(x)
+# -----------------------------------------------------------------------
+alpha_sweep:
+  alphas: [1.0e-4, 1.0e-3, 0.01, 0.1]
+  n_steps: 100
+  n_init: 5
+
+# -----------------------------------------------------------------------
+# Demo: regularisation sweep (trains separate SpectralCAN per λ_reg)
+# -----------------------------------------------------------------------
+reg_sweep:
+  lam_regs: [0.0, 0.001, 0.01, 0.1]
+  n_epochs: 200        # shorter training for the sweep

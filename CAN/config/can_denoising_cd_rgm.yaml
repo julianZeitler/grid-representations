@@ -1,0 +1,68 @@
+defaults:
+  - _self_
+
+exp_id: "f642b20826b842d8be9c07327ce3e458"
+k: 0
+
+box_width: 2.0
+box_height: 2.0
+
+n_samples: 1000
+n_vis_steps: 40
+
+# -----------------------------------------------------------------------
+# Position decoder z → x (trained with frozen encoder)
+# -----------------------------------------------------------------------
+decoder:
+  hidden_dim: 64
+  n_layers: 2
+  n_train: 50000
+  lr: 1.0e-3
+  batch_size: 256
+  n_epochs: 200
+  log_interval: 20
+  box_width: 4.0
+  box_height: 4.0
+
+# -----------------------------------------------------------------------
+# Denoising map g_θ architecture
+# -----------------------------------------------------------------------
+model:
+  hidden_dim: 128
+  n_layers: 3
+
+# -----------------------------------------------------------------------
+# Training
+# -----------------------------------------------------------------------
+train:
+  n_epochs: 500
+  batch_size: 64
+  lr: 1.0e-3
+  grad_clip: 1.0
+  log_interval: 50
+
+# -----------------------------------------------------------------------
+# Contrastive divergence / Langevin sampler
+# -----------------------------------------------------------------------
+cd:
+  n_steps: 20          # Langevin steps per training iteration
+  step_size: 0.05      # η_L — Langevin GD step size
+  noise_std_max: 0.5   # σ at epoch 0  (broad exploration)
+  noise_std_min: 0.05  # σ at final epoch (local refinement)
+  buffer_size: 512     # number of persistent fantasy particles
+  lam_vol: 0.01         # volume regularizer weight (0 = disabled)
+
+# -----------------------------------------------------------------------
+# Demo: α sweep — GD inference step size
+# -----------------------------------------------------------------------
+alpha_sweep:
+  alphas: [0.01, 0.1, 1.0]
+  n_steps: 100
+  n_init: 5
+
+# -----------------------------------------------------------------------
+# Demo: Langevin fantasy particle visualisation
+# -----------------------------------------------------------------------
+langevin_vis:
+  n_particles: 200
+  n_steps: 500

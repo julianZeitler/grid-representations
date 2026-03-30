@@ -233,3 +233,37 @@ class ElmanRGM(nn.Module):
         z_final = z_final.squeeze(0)
 
         return outputs, z_final
+
+
+class PositionDecoder(nn.Module):
+    """
+    MLP decoder: R^D → R^2
+
+    Trained on top of a *frozen* ActionableRGM encoder to invert the mapping
+    z(x) → x.  Supervised with MSE loss on (z(x), x) pairs sampled uniformly
+    from the 2D arena.  Replaces nearest-neighbour grid lookup for decoding
+    latent trajectories back to position space.
+    """
+
+    def __init__(self, latent_size: int, hidden_dim: int = 64, n_layers: int = 2):
+        super().__init__()
+        layers: list[nn.Module] = []
+        in_dim = latent_size
+        for _ in range(n_layers):
+            layers.append(nn.Linear(in_dim, hidden_dim))
+            layers.append(nn.ReLU())
+            in_dim = hidden_dim
+        layers.append(nn.Linear(in_dim, 2))
+        self.net = nn.Sequential(*layers)
+
+    def forward(self, z: torch.Tensor) -> torch.Tensor:
+        """
+        Decode latent z to 2D position.
+
+        Args:
+            z: shape [B, D]
+
+        Returns:
+            x_hat: shape [B, 2]
+        """
+        return self.net(z)
