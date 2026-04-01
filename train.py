@@ -153,7 +153,7 @@ def train(cfg: DictConfig, continue_id: Optional[str] = None) -> None:
         else:
             train_path = os.path.join(cfg.data.save_path, get_dataset_name(cfg.data), "train", "k_0")
         if not os.path.exists(train_path):
-            generator = TrajectoryGenerator()
+            generator = TrajectoryGenerator(sigma=cfg.data.sigma, b=cfg.data.b, dt=cfg.data.dt, mu=cfg.data.mu)
             generator.generate_dataset(
                 train_path,
                 num_sequences=10000000//cfg.data.seq_len,
@@ -166,7 +166,7 @@ def train(cfg: DictConfig, continue_id: Optional[str] = None) -> None:
             
         val_path = os.path.join(cfg.data.save_path, get_dataset_name(cfg.data), "val")
         if not os.path.exists(val_path):
-            generator = TrajectoryGenerator()
+            generator = TrajectoryGenerator(sigma=cfg.data.sigma, b=cfg.data.b, dt=cfg.data.dt, mu=cfg.data.mu)
             generator.generate_dataset(
                 val_path,
                 num_sequences=1000000//cfg.data.seq_len,

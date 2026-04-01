@@ -9,6 +9,10 @@ data:
   n_shift: 15
   sigma_shift: 3
   save_path: "data/"
+  sigma: 11.52   # stdev rotation velocity (rads/sec), default: 5.76 * 2
+  b: 0.8168      # forward velocity Rayleigh scale (m/sec), default: 0.13 * 2 * pi
+  dt: 0.02       # time step increment (seconds)
+  mu: 0.0        # turn angle bias (rads)
 
 model:
   _target_: rgm.ActionableRGM

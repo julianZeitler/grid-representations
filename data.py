@@ -115,15 +115,30 @@ class TrajectoryGenerator:
         border_region: Distance from wall at which avoidance behavior activates.
     """
 
-    def __init__(self, periodic: bool = False) -> None:
+    def __init__(
+        self,
+        periodic: bool = False,
+        sigma: float = 5.76 * 2,
+        b: float = 0.13 * 2 * np.pi,
+        dt: float = 0.02,
+        mu: float = 0.0,
+    ) -> None:
         """Initialize the trajectory generator.
 
         Args:
             periodic: If True, use periodic boundary conditions. If False,
                 the agent avoids walls by turning away when near boundaries.
+            sigma: Standard deviation of rotation velocity (rads/sec).
+            b: Scale parameter of the forward velocity Rayleigh distribution (m/sec).
+            dt: Time step increment (seconds).
+            mu: Turn angle bias (rads).
         """
         self.periodic = periodic
         self.border_region: float = 0.03
+        self.sigma = sigma
+        self.b = b
+        self.dt = dt
+        self.mu = mu
 
     def avoid_wall(
         self,
@@ -187,10 +202,10 @@ class TrajectoryGenerator:
             batch_size is given, else [sequence_length, 2]. Contains (x, y)
             coordinates in meters.
         """
-        dt = 0.02  # time step increment (seconds)
-        sigma = 5.76 * 2  # stdev rotation velocity (rads/sec)
-        b = 0.13 * 2 * np.pi  # forward velocity rayleigh dist scale (m/sec)
-        mu = 0  # turn angle bias
+        dt = self.dt
+        sigma = self.sigma
+        b = self.b
+        mu = self.mu
 
         if batch_size is None:
             batch_size_internal = 1
