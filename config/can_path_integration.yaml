@@ -3,7 +3,7 @@ defaults:
 
 # MLflow run ID to load the ActionableRGM from.
 # Override on the command line: exp_id=<run_id>
-exp_id: "f642b20826b842d8be9c07327ce3e458"
+exp_id: "3c4b5e27984244f0b2221a63852069e1"
 # Iteration k whose model weights are loaded.
 k: 0
 
@@ -59,7 +59,7 @@ can:
 
   # Demo 6: n_can_steps CAN relaxation steps followed by one PI step per trajectory timestep
   combined:
-    alpha_can: 0.1
+    alphas: [0.0, 0.01, 0.1]
     n_can_steps: 1
     n_steps: 100
     n_trajectories: 5

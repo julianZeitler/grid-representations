@@ -2,7 +2,7 @@ defaults:
   - _self_
 
 data:
-  seq_len: 200
+  seq_len: 100
   dim: 2
   box_width: 2
   box_height: 2
@@ -35,8 +35,8 @@ loss:
   sigma_theta: 0.5
   f: 1
   sep_scale: 100
-  causal: true
-  decay: 0.95
+  causal: false
+  decay: null
 
 regularization:
   positivity:

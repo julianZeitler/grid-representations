@@ -544,6 +544,7 @@ def _generate_trajectories(
         mu=cfg.data.mu,
     )
     # positions: [n_traj, n_steps, 2], centered at 0
+    np.random.seed(42)
     positions = gen.generate_trajectory(box_w, box_h, n_steps, batch_size=n_traj)
     offset = np.array([box_w / 2, box_h / 2])
     x0 = (positions[:, 0] + offset).astype(np.float32)
@@ -624,61 +625,58 @@ def demo_combined(
     n_steps = cfg.can.combined.n_steps
     n_traj = cfg.can.combined.n_trajectories
     n_can_steps = cfg.can.combined.n_can_steps
+    alphas = list(cfg.can.combined.alphas)
     old_alpha = integrator.alpha_can
-    integrator.alpha_can = cfg.can.combined.alpha_can
 
     x0_np, dx_np = _generate_trajectories(box_w, box_h, n_steps, n_traj, cfg)
+    # dx_np = np.concatenate([dx_np, np.zeros((n_traj, 20, 2), dtype=dx_np.dtype)], axis=1)
     x0 = torch.tensor(x0_np)
     z0 = _make_z0(model, n_traj)
-
     dx_zero = torch.zeros(n_traj, 2)
 
-    z, x = z0, x0
-    x_hist = [x0_np.copy()]
-
-    with torch.no_grad():
-        for t in range(dx_np.shape[1]):
-            # CAN relaxation: n_can_steps with dx_pi = 0
-            for _ in range(n_can_steps):
-                z, x = integrator.step(z, x, dx_zero)
-            # Path integration: apply the trajectory displacement for this step
-            dx_pi = torch.tensor(dx_np[:, t])
-            z, x = integrator.step(z, x, dx_pi)
-            x_hist.append(x.numpy().copy())
-
-    x_hist_np = np.stack(x_hist, axis=1)  # [n_traj, n_steps, 2]
-
     E_norm = (E_grid - E_grid.mean()) / (E_grid.std() + 1e-10)
-    fig, axes = plt.subplots(1, 2, figsize=(14, 6))
+    fig, axes = plt.subplots(1, len(alphas), figsize=(6 * len(alphas), 6), sharey=True)
+    if len(alphas) == 1:
+        axes = [axes]
 
-    for ax in axes:
+    for ax, alpha in zip(axes, alphas):
+        print(f"  alpha_can = {alpha} ...")
+        integrator.alpha_can = alpha
+
+        z, x = z0.clone(), x0.clone()
+        x_hist = [x0_np.copy()]
+
+        with torch.no_grad():
+            for t in range(dx_np.shape[1]):
+                # CAN relaxation: n_can_steps with dx_pi = 0
+                for _ in range(n_can_steps):
+                    z, x = integrator.step(z, x, dx_zero)
+                # Path integration: apply the trajectory displacement for this step
+                dx_pi = torch.tensor(dx_np[:, t])
+                z, x = integrator.step(z, x, dx_pi)
+                x_hist.append(x.numpy().copy())
+
+        x_hist_np = np.stack(x_hist, axis=1)  # [n_traj, n_steps, 2]
+
         ax.imshow(E_norm.T, origin="lower", extent=(0, box_w, 0, box_h),
                   cmap="RdBu_r", alpha=0.4)
         ax.contour(x_vals, y_vals, E_norm.T, levels=15, colors="k",
                    linewidths=0.4, alpha=0.3)
 
-    for b in range(n_traj):
-        traj = x_hist_np[b]  # [n_steps, 2]
-        axes[0].plot(traj[:, 0], traj[:, 1], linewidth=0.9, alpha=0.8)
-        axes[0].plot(*traj[0], "go", markersize=5)
-        axes[0].plot(*traj[-1], "rs", markersize=5)
-        e_traj = [energy(torch.tensor(traj[t], dtype=torch.float32), integrator.A, model)
-                  for t in range(len(traj))]
-        axes[1].plot(e_traj, alpha=0.7, linewidth=0.8)
+        for b in range(n_traj):
+            traj = x_hist_np[b]  # [n_steps, 2]
+            ax.plot(traj[:, 0], traj[:, 1], linewidth=0.9, alpha=0.8)
+            ax.plot(*traj[0], "go", markersize=5)
+            ax.plot(*traj[-1], "rs", markersize=5)
 
-    for ax in axes:
         ax.set_xlim(0, box_w)
         ax.set_ylim(0, box_h)
+        ax.set_title(f"α={alpha}")
+        ax.set_xlabel("x₁")
 
-    axes[0].set_title(f"Trajectories (alpha_can={integrator.alpha_can}, {n_can_steps} CAN steps/PI step)")
-    axes[0].set_xlabel("x₁")
     axes[0].set_ylabel("x₂")
-    axes[1].set_title("Energy E(x) along trajectory")
-    axes[1].set_xlabel("Outer step")
-    axes[1].set_ylabel("E(x)")
-
     fig.suptitle(f"Combined CAN ({n_can_steps} inner steps) + path integration", fontsize=13)
-    plt.tight_layout()
+    plt.tight_layout(rect=(0, 0, 1, 0.95))
     mlflow.log_figure(fig, "combined.png")
     plt.close()
 
@@ -723,10 +721,10 @@ def main(cfg: DictConfig) -> None:
         })
 
         x_vals, y_vals, E_grid = demo_energy_landscape(model, A, cfg)
-        demo_alpha_sweep(integrator, model, x_vals, y_vals, E_grid, cfg)
-        demo_noise(integrator, model, x_vals, y_vals, E_grid, cfg)
-        demo_trajectories(integrator, model, x_vals, y_vals, E_grid, cfg)
-        demo_path_integration(integrator, model, x_vals, y_vals, E_grid, cfg)
+        # demo_alpha_sweep(integrator, model, x_vals, y_vals, E_grid, cfg)
+        # demo_noise(integrator, model, x_vals, y_vals, E_grid, cfg)
+        # demo_trajectories(integrator, model, x_vals, y_vals, E_grid, cfg)
+        # demo_path_integration(integrator, model, x_vals, y_vals, E_grid, cfg)
         demo_combined(integrator, model, x_vals, y_vals, E_grid, cfg)
 
     print("\n" + "=" * 60)

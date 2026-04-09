@@ -344,9 +344,9 @@ def demo_alpha_sweep(
         ax_energy.set_xlabel("Step")
         if row == 0:
             ax_traj.set_title("Trajectories on energy landscape")
-            ax_energy.set_title("Energy E(x) — must decrease")
+            ax_energy.set_title("Energy E(x)")
 
-    fig.suptitle("On-manifold gradient descent: varying α", fontsize=13)
+    fig.suptitle("On-manifold gradient descent", fontsize=13)
     plt.tight_layout()
     mlflow.log_figure(fig, "alpha_sweep.png")
     plt.close()
@@ -483,7 +483,7 @@ def demo_trajectories(
                 traj.append(x.copy())
             traj = np.array(traj)
 
-            ax.scatter(traj[:, 0], traj[:, 1], s=18, color="tomato", alpha=0.3, zorder=2)
+            ax.scatter(traj[:, 0], traj[:, 1], s=18, color="purple", alpha=0.3, zorder=2)
             ax.set_xlim(0, box_w)
             ax.set_ylim(0, box_h)
 
@@ -524,7 +524,7 @@ def main(cfg: DictConfig) -> None:
         mlflow.log_text(OmegaConf.to_yaml(cfg, resolve=True), "config.yaml")
         mlflow.log_params({"exp_id": cfg.exp_id, "k": cfg.k, "latent_size": model.latent_size})
 
-        demo_embedding(model, cfg)
+        # demo_embedding(model, cfg)
         x_vals, y_vals, E_grid = demo_energy_landscape(model, A, cfg)
         demo_alpha_sweep(model, A, x_vals, y_vals, E_grid, cfg)
         demo_noise(model, A, x_vals, y_vals, E_grid, cfg)
