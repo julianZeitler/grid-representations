@@ -84,7 +84,7 @@ Each run logs hyperparameters, loss curves, and analysis plots. The run ID is us
 | `epochs` | `400` | Total training epochs |
 | `train_iterations` | `10` | Gradient steps per training epoch |
 | `val_iterations` | `1` | Evaluation steps per epoch |
-| `K` | `1` | Number of RGM application steps per sample |
+| `K` | `1` | Number of total training runs |
 | `batch_size` | `5` | Trajectories per batch |
 | `vary_seed` | `false` | Randomly initialize for each k |
 | `vary_data` | `false` | Resample dataset for each k |
