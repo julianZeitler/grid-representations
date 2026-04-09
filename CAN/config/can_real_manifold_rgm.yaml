@@ -1,0 +1,39 @@
+defaults:
+  - _self_
+
+# MLflow run ID to load the ActionableRGM from.
+# Override on the command line: exp_id=<run_id>
+exp_id: "3c4b5e27984244f0b2221a63852069e1"
+# Iteration k whose model weights are loaded.
+# Override on the command line: k=0
+k: 0
+
+box_width: 2.0
+box_height: 2.0
+
+# Grid resolution per dimension for building A (n_weight_steps^2 total samples)
+n_weight_steps: 20
+# Grid resolution per dimension for visualisations (n_vis_steps^2 total evaluations)
+n_vis_steps: 40
+
+alpha_sweep:
+  alphas: [1e-4, 1e-3, 1e-2, 0.1, 1.0]
+  n_steps: 100
+  n_init: 5  # number of random starting positions
+
+noise:
+  alpha: 0.01
+  noise_levels: [0.0, 0.001, 0.01, 0.1]
+  n_steps: 100
+  n_init: 5
+
+trajectories:
+  start_positions:
+    - [0.4, 0.4]
+    - [1.0, 1.0]
+    - [1.6, 1.6]
+    - [0.4, 1.6]
+    - [1.6, 0.4]
+  noise_levels: [0.0, 0.01, 0.1]
+  alpha: 0.01
+  n_steps: 200

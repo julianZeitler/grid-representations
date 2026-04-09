@@ -1,0 +1,44 @@
+defaults:
+  - _self_
+
+# MLflow run ID to load the ActionableRGM from.
+exp_id: "f642b20826b842d8be9c07327ce3e458"
+# Iteration k whose model weights are loaded.
+k: 0
+
+box_width: 2.0
+box_height: 2.0
+
+# Grid resolution for visualisations (n_vis_steps^2 total evaluations)
+n_vis_steps: 40
+
+# -----------------------------------------------------------------------
+# Hebbian learning of A
+# -----------------------------------------------------------------------
+hebbian:
+  lr: 0.01            # Hebbian learning rate η
+  weight_decay: 0.001 # Forgetting factor γ (keeps A bounded)
+  n_iter: 5000        # Total number of Hebbian update steps
+  batch_size: 16      # Mini-batch size per step
+  n_snapshots: 6      # Number of log-spaced snapshots of A to record
+
+# -----------------------------------------------------------------------
+# Demo: energy landscape evolution
+# -----------------------------------------------------------------------
+evolution:
+  alpha: 0.01         # Gradient-descent step size for trajectory demo
+  n_traj_steps: 100   # Number of GD steps per trajectory
+  n_init: 5           # Number of random starting points
+
+# -----------------------------------------------------------------------
+# Demo: final trajectories
+# -----------------------------------------------------------------------
+final_trajectories:
+  start_positions:
+    - [0.4, 0.4]
+    - [1.0, 1.0]
+    - [1.6, 1.6]
+    - [0.4, 1.6]
+    - [1.6, 0.4]
+  alpha: 0.01
+  n_steps: 200

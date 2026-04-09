@@ -1,0 +1,65 @@
+defaults:
+  - _self_
+
+# MLflow run ID to load the ActionableRGM from.
+# Override on the command line: exp_id=<run_id>
+exp_id: "3c4b5e27984244f0b2221a63852069e1"
+# Iteration k whose model weights are loaded.
+k: 0
+
+data:
+  dim: 2
+  box_width: 2
+  box_height: 2
+  sigma: 11.52   # stdev rotation velocity (rads/sec), default: 5.76 * 2
+  b: 0.8168      # forward velocity Rayleigh scale (m/sec), default: 0.13 * 2 * pi
+  dt: 0.02       # time step increment (seconds)
+  mu: 0.0        # turn angle bias (rads)
+
+model:
+  _target_: rgm.ActionableRGM
+  input_size: ${data.dim}
+  latent_size: 65
+  om_init_scale: 2
+
+can:
+  alpha_can: 0.01
+
+  # Grid resolution per dimension for building A (n_weight_steps^2 total samples)
+  n_weight_steps: 20
+  # Grid resolution per dimension for visualisations (n_vis_steps^2 total evaluations)
+  n_vis_steps: 40
+
+  alpha_sweep:
+    alphas: [1e-2, 0.1, 1.0]
+    n_steps: 100
+    n_init: 5
+
+  noise:
+    alpha_can: 0.01
+    noise_levels: [0.0, 0.001, 0.01, 0.1]
+    n_steps: 100
+    n_init: 5
+
+  trajectories:
+    start_positions:
+      - [0.4, 0.4]
+      - [1.0, 1.0]
+      - [1.6, 1.6]
+      - [0.4, 1.6]
+      - [1.6, 0.4]
+    noise_levels: [0.0, 0.01, 0.1]
+    alpha_can: 0.1
+    n_steps: 50
+
+  path_integration:
+    alpha_can: 0.0
+    n_steps: 100
+    n_trajectories: 5
+
+  # Demo 6: n_can_steps CAN relaxation steps followed by one PI step per trajectory timestep
+  combined:
+    alphas: [0.0, 0.01, 0.1]
+    n_can_steps: 1
+    n_steps: 100
+    n_trajectories: 5

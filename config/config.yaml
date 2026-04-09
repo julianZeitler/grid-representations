@@ -2,13 +2,17 @@ defaults:
   - _self_
 
 data:
-  seq_len: 200
+  seq_len: 100
   dim: 2
   box_width: 2
   box_height: 2
   n_shift: 15
   sigma_shift: 3
   save_path: "data/"
+  sigma: 11.52   # stdev rotation velocity (rads/sec), default: 5.76 * 2
+  b: 0.8168      # forward velocity Rayleigh scale (m/sec), default: 0.13 * 2 * pi
+  dt: 0.02       # time step increment (seconds)
+  mu: 0.0        # turn angle bias (rads)
 
 model:
   _target_: rgm.ActionableRGM
@@ -20,9 +24,9 @@ training:
   epochs: 400
   train_iterations: 10
   val_iterations: 1
-  K: 5
+  K: 1
   batch_size: 5
-  vary_seed: true
+  vary_seed: false
   vary_data: false
 
 loss:
@@ -31,8 +35,8 @@ loss:
   sigma_theta: 0.5
   f: 1
   sep_scale: 100
-  causal: true
-  decay: 0.95
+  causal: false
+  decay: null
 
 regularization:
   positivity:
