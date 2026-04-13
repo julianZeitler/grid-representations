@@ -67,7 +67,7 @@ def get_ratemaps(model: nn.Module, res: int, widths: tuple) -> list[np.ndarray]:
     return ratemaps
 
 
-def quantitative_analysis(Vs: list[np.ndarray], widths: tuple, res: int = 70) -> tuple[go.Figure, dict]:
+def quantitative_analysis(Vs: list[np.ndarray], widths: tuple, res: int = 70) -> tuple[go.Figure, go.Figure, dict]:
     """Compute grid scores for ratemaps at different scales.
 
     Args:
@@ -79,7 +79,8 @@ def quantitative_analysis(Vs: list[np.ndarray], widths: tuple, res: int = 70) ->
         Tuple of (figure, scores_dict)
     """
     scores = {}
-    fig_score = make_subplots(rows=1, cols=3, subplot_titles=["Small Ratemaps", "Medium Ratemaps", "Large Ratemaps"])
+    fig_60 = make_subplots(rows=1, cols=3, subplot_titles=["Small Ratemaps", "Medium Ratemaps", "Large Ratemaps"])
+    fig_90 = make_subplots(rows=1, cols=3, subplot_titles=["Small Ratemaps", "Medium Ratemaps", "Large Ratemaps"])
     scale_names = ["sm", "md", "lg"]
     scale_titles = ["Small Ratemaps", "Medium Ratemaps", "Large Ratemaps"]
 
@@ -99,28 +100,28 @@ def quantitative_analysis(Vs: list[np.ndarray], widths: tuple, res: int = 70) ->
         score_60 = np.nan_to_num(score_60)
         score_90 = np.nan_to_num(score_90)
 
-        max_score = np.max(score_60)
-        mean_score = np.mean(score_60)
-
-        fig_score.add_trace(
-            go.Histogram(x=score_60, xbins=dict(start=-2, end=2, size=4/15),
-                         name=scale_titles[idx], marker_color='steelblue'),
-            row=1, col=idx + 1
-        )
-
         axis_suffix = "" if idx == 0 else str(idx + 1)
-        fig_score.add_annotation(
-            x=0.05, y=0.95, xref=f"x{axis_suffix} domain", yref=f"y{axis_suffix} domain",
-            text=f"Max: {max_score:.3f}<br>Mean: {mean_score:.3f}",
-            showarrow=False, bgcolor="wheat", opacity=0.8,
-            xanchor="left", yanchor="top", align="left"
-        )
+
+        for fig, scores_arr, color in [(fig_60, score_60, 'steelblue'), (fig_90, score_90, 'tomato')]:
+            max_s  = np.max(scores_arr)
+            mean_s = np.mean(scores_arr)
+            fig.add_trace(
+                go.Histogram(x=scores_arr, xbins=dict(start=-2, end=2, size=4/15),
+                             name=scale_titles[idx], marker_color=color, showlegend=False),
+                row=1, col=idx + 1,
+            )
+            fig.add_annotation(
+                x=0.05, y=0.95, xref=f"x{axis_suffix} domain", yref=f"y{axis_suffix} domain",
+                text=f"Max: {max_s:.3f}<br>Mean: {mean_s:.3f}",
+                showarrow=False, bgcolor="wheat", opacity=0.8,
+                xanchor="left", yanchor="top", align="left",
+            )
 
         prefix = scale_names[idx]
         scores[f"{prefix}_60"] = score_60
         scores[f"{prefix}_90"] = score_90
-        scores[f"{prefix}_60_max"] = max_score
-        scores[f"{prefix}_60_mean"] = mean_score
+        scores[f"{prefix}_60_max"] = np.max(score_60)
+        scores[f"{prefix}_60_mean"] = np.mean(score_60)
         scores[f"{prefix}_90_max"] = np.max(score_90)
         scores[f"{prefix}_90_mean"] = np.mean(score_90)
 
@@ -133,10 +134,13 @@ def quantitative_analysis(Vs: list[np.ndarray], widths: tuple, res: int = 70) ->
     scores["count_60"] = np.sum(scores["pattern_type"] == 60)
     scores["count_90"] = np.sum(scores["pattern_type"] == 90)
 
-    fig_score.update_xaxes(title_text="Grid score", range=[-2, 2])
-    fig_score.update_yaxes(title_text="Count")
-    fig_score.update_layout(height=500, width=1200, showlegend=False)
-    return fig_score, scores
+    for fig in (fig_60, fig_90):
+        fig.update_xaxes(title_text="Grid score", range=[-2, 2])
+        fig.update_yaxes(title_text="Count")
+        fig.update_layout(height=500, width=1200, showlegend=False)
+    fig_60.update_layout(title_text="Grid scores — 60°")
+    fig_90.update_layout(title_text="Grid scores — 90°")
+    return fig_60, fig_90, scores
 
 def manifold_cloud(
     embedding: NDArray[np.floating],
@@ -770,8 +774,9 @@ def generate_2d_plots(model: nn.Module, k: int = 0, generate_manifold = False) -
     Vs = get_ratemaps(model, res, widths)
     V_small, V_medium, V_large = Vs
 
-    fig_score, scores = quantitative_analysis(Vs, widths, res)
-    log_figure(fig_score, f"grid_scores_k{k}")
+    fig_scores_60, fig_scores_90, scores = quantitative_analysis(Vs, widths, res)
+    log_figure(fig_scores_60, f"grid_scores_60_k{k}")
+    log_figure(fig_scores_90, f"grid_scores_90_k{k}")
 
     # Log scalar scores as metrics
     for key, value in scores.items():
