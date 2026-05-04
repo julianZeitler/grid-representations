@@ -195,7 +195,10 @@ class GridScorer(object):
 
     for m in range(2, max_m + 1):
       sc = SpectralClustering(n_clusters=m, affinity="precomputed", random_state=42)
-      labels = sc.fit_predict(similarity_matrix)
+      try:
+        labels = sc.fit_predict(similarity_matrix)
+      except Exception:
+        continue
       try:
         score = silhouette_score(distance_matrix, labels, metric="precomputed")
       except Exception:
