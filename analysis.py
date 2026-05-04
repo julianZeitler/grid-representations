@@ -135,11 +135,11 @@ def quantitative_analysis(Vs: list[np.ndarray], widths: tuple, res: int = 70) ->
     scores["count_90"] = np.sum(scores["pattern_type"] == 90)
 
     for fig in (fig_60, fig_90):
-        fig.update_xaxes(title_text="Grid score", range=[-2, 2])
-        fig.update_yaxes(title_text="Count")
+        fig.update_xaxes(title_text="Grid score", range=[-2, 2], title_font=dict(size=16), tickfont=dict(size=16))
+        fig.update_yaxes(title_text="Count", title_font=dict(size=16), tickfont=dict(size=16))
         fig.update_layout(height=500, width=1200, showlegend=False)
-    fig_60.update_layout(title_text="Grid scores — 60°")
-    fig_90.update_layout(title_text="Grid scores — 90°")
+        for ann in fig.layout.annotations:
+            ann.font.size = 20
     return fig_60, fig_90, scores
 
 def manifold_cloud(
@@ -209,7 +209,8 @@ def manifold_cloud(
         ))
 
     fig.update_layout(
-        title=f"Manifold Embedding (colored by 2D position) - Module {m} ({n_components} components)"
+        title=f"Manifold Embedding (colored by 2D position) - Module {m} ({n_components} components)",
+        showlegend=False,
     )
     return fig
 
@@ -253,10 +254,10 @@ def manifold_slice(
     )
     axis_labels = ['x', 'y', 'z']
     fig.update_layout(
-        title=f"Manifold Slice (axes {axis_labels[ax0]}/{axis_labels[ax1]}, ε={epsilon}) - Module {m} ({n_components} components)",
         xaxis_title=f"{axis_labels[ax0]}",
         yaxis_title=f"{axis_labels[ax1]}",
-        xaxis=dict(scaleanchor='y', scaleratio=1),
+        xaxis=dict(scaleanchor='y', scaleratio=1, title_font=dict(size=20), tickfont=dict(size=20)),
+        yaxis=dict(title_font=dict(size=20), tickfont=dict(size=20)),
         height=600,
         width=600,
     )
@@ -436,24 +437,34 @@ def loss_plots(
         )
     )
 
+    for ann in fig.layout.annotations:
+        ann.font.size = 16
+
     return fig
 
 
-def neuron_plotter_2d(V: np.ndarray, res: int, scores: Optional[np.ndarray] = None) -> go.Figure:
+def neuron_plotter_2d(
+    V: np.ndarray,
+    res: int,
+    scores: Optional[np.ndarray] = None,
+    show_colorbar: bool = True,
+) -> go.Figure:
     """Plot individual neuron ratemaps.
 
     Args:
         V: Ratemap array of shape (n_neurons, res*res)
         res: Resolution of ratemaps
-        scores: Optional array of scores for each neuron
+        scores: Optional array of scores for each neuron; if None, no titles shown
+        show_colorbar: Whether to show the colorbar on the first heatmap
     """
     D = V.shape[0]
     RowsD = int(np.ceil(np.sqrt(D)))
     ColumnsD = int(np.ceil(D / RowsD))
 
-    subplot_titles = [f'{scores[i]:.3f}' if scores is not None else '' for i in range(D)]
+    vertical_spacing = 0.03 if scores is not None else 0.01
+    subplot_titles = [f'{scores[i]:.3f}' for i in range(D)] if scores is not None else None
     fig = make_subplots(rows=RowsD, cols=ColumnsD, subplot_titles=subplot_titles,
-                        horizontal_spacing=0.002, vertical_spacing=0.03)
+                        horizontal_spacing=0.001, vertical_spacing=vertical_spacing)
 
     vmin, vmax = V.min(), V.max()
 
@@ -463,7 +474,7 @@ def neuron_plotter_2d(V: np.ndarray, res: int, scores: Optional[np.ndarray] = No
         heatmap = go.Heatmap(
             z=np.reshape(V[neuron, :], [res, res]),
             zmin=vmin, zmax=vmax, colorscale='Viridis',
-            showscale=(neuron == 0)
+            showscale=(neuron == 0 and show_colorbar)
         )
         fig.add_trace(heatmap, row=row, col=col)
 
@@ -667,10 +678,11 @@ def frequency_plot(om: np.ndarray) -> go.Figure:
         marker=dict(size=12, opacity=0.6)
     ))
     fig.update_layout(
-        title='Frequency vectors',
-        xaxis_title='ω_x', yaxis_title='ω_y',
-        xaxis=dict(scaleanchor='y', scaleratio=1, zeroline=True, zerolinewidth=1, zerolinecolor='black'),
-        yaxis=dict(zeroline=True, zerolinewidth=1, zerolinecolor='black'),
+        xaxis_title='ω<sub>x</sub>', yaxis_title='ω<sub>y</sub>',
+        xaxis=dict(scaleanchor='y', scaleratio=1, zeroline=True, zerolinewidth=1, zerolinecolor='black',
+                   title_font=dict(size=28), tickfont=dict(size=28)),
+        yaxis=dict(zeroline=True, zerolinewidth=1, zerolinecolor='black',
+                   title_font=dict(size=28), tickfont=dict(size=28)),
         width=600, height=600
     )
     return fig
@@ -692,13 +704,16 @@ def s_matrix_plot(S: np.ndarray) -> go.Figure:
     fig = make_subplots(rows=1, cols=3, subplot_titles=titles, horizontal_spacing=0.01)
     for i, mat in enumerate(matrices):
         fig.add_trace(
-            go.Heatmap(z=mat, colorscale='RdBu_r', showscale=(i == 2)),
+            go.Heatmap(z=mat, colorscale='Viridis', showscale=(i == 2),
+                       colorbar=dict(tickfont=dict(size=20))),
             row=1, col=i + 1
         )
         axis_suffix = "" if i == 0 else str(i + 1)
-        fig.update_xaxes(constrain='domain', row=1, col=i + 1)
+        fig.update_xaxes(constrain='domain', tickfont=dict(size=20), row=1, col=i + 1)
         fig.update_yaxes(scaleanchor=f'x{axis_suffix}', scaleratio=1,
-                         constrain='domain', row=1, col=i + 1)
+                         constrain='domain', autorange='reversed', tickfont=dict(size=20), row=1, col=i + 1)
+    for ann in fig.layout.annotations:
+        ann.font.size = 24
     fig.update_layout(height=350, width=800)
     return fig
 
@@ -736,7 +751,10 @@ def grid_type(
     fig.update_layout(
         xaxis_title='Grid score (90°)',
         yaxis_title='Grid score (60°)',
-        xaxis=dict(scaleanchor='y', scaleratio=1),
+        xaxis=dict(range=[lo, hi], title_font=dict(size=20), tickfont=dict(size=20)),
+        yaxis=dict(range=[lo, hi], scaleanchor='x', scaleratio=1, title_font=dict(size=20), tickfont=dict(size=20)),
+        legend=dict(font=dict(size=20)),
+        font=dict(size=20),
         width=600,
         height=600,
     )
@@ -756,17 +774,17 @@ def generate_2d_plots(model: nn.Module, k: int = 0, generate_manifold = False) -
     """
     model.eval()
 
-    # Extract model parameters for visualization
-    om: np.ndarray = getattr(model, 'om').detach().cpu().numpy()
-    S: np.ndarray = getattr(model, 'S').detach().cpu().numpy()
+    # Frequency plot (ActionableRGM only)
+    if hasattr(model, 'om'):
+        om: np.ndarray = model.om.detach().cpu().numpy()
+        fig_freq = frequency_plot(om)
+        log_figure(fig_freq, f"freq_plot_k{k}")
 
-    # Frequency plot
-    fig_freq = frequency_plot(om)
-    log_figure(fig_freq, f"freq_plot_k{k}")
-
-    # S analysis
-    fig_S = s_matrix_plot(S)
-    log_figure(fig_S, f"S_analysis_k{k}")
+    # S matrix analysis (ActionableRGM only)
+    if hasattr(model, 'S'):
+        S: np.ndarray = model.S.detach().cpu().numpy()
+        fig_S = s_matrix_plot(S)
+        log_figure(fig_S, f"S_analysis_k{k}")
 
     # Grid scores
     res = 70
@@ -802,6 +820,11 @@ def generate_2d_plots(model: nn.Module, k: int = 0, generate_manifold = False) -
     neuron_lg_fig_90 = neuron_plotter_2d(V_large, res, scores["lg_90"])
     log_figure(neuron_lg_fig_90, f"neurons_large_k{k}_scores_90")
 
+    # Neuron plots without scores/colorbar
+    log_figure(neuron_plotter_2d(V_small, res, show_colorbar=False), f"neurons_small_k{k}_plain")
+    log_figure(neuron_plotter_2d(V_medium, res, show_colorbar=False), f"neurons_medium_k{k}_plain")
+    log_figure(neuron_plotter_2d(V_large, res, show_colorbar=False), f"neurons_large_k{k}_plain")
+
     # Module extraction and manifold analysis using large ratemaps
     large_width = widths[2]
     coord_range = ((-large_width / 2, large_width / 2), (-large_width / 2, large_width / 2))
@@ -814,6 +837,7 @@ def generate_2d_plots(model: nn.Module, k: int = 0, generate_manifold = False) -
     sacs = [scorer.calculate_sac(V_large[i, :].reshape(res, res)) for i in range(V_large.shape[0])]
     labels, _ = scorer.get_modules(sacs, max_m=15)
     n_modules = int(max(labels)) + 1
+    mlflow.log_metric(f"k{k}/n_modules", n_modules)
 
     # Plot ratemaps organized by module
     module_fig = module_ratemaps_plot(V_large, res, scores["lg_60"], labels)
@@ -825,7 +849,42 @@ def generate_2d_plots(model: nn.Module, k: int = 0, generate_manifold = False) -
     if not generate_manifold:
         return scores
 
-    # Generate trajectory data for manifold analysis
+    # Check which modules already have precomputed manifold artifacts
+    client = MlflowClient()
+    active_run = mlflow.active_run()
+    run_id = active_run.info.run_id if active_run is not None else None
+
+    def _artifact_exists(artifact_path: str) -> bool:
+        if run_id is None:
+            return False
+        try:
+            parent = "/".join(artifact_path.rsplit("/", 1)[:-1])
+            filename = artifact_path.rsplit("/", 1)[-1]
+            artifacts = client.list_artifacts(run_id, parent)
+            return any(a.path == artifact_path or a.path.endswith("/" + filename) for a in artifacts)
+        except Exception:
+            return False
+
+    def _load_artifact_npy(artifact_path: str) -> NDArray[np.floating] | None:
+        if run_id is None:
+            return None
+        try:
+            with tempfile.TemporaryDirectory() as tmpdir:
+                local_path = client.download_artifacts(run_id, artifact_path, tmpdir)
+                return np.load(local_path)
+        except Exception:
+            return None
+
+    # Determine which modules have cached embeddings (only UMAP is skipped, not model forward pass)
+    modules_need_umap = []
+    for module_idx in range(n_modules):
+        emb_artifact = f"manifold/k{k}/embedding_module{module_idx}.npy"
+        if _artifact_exists(emb_artifact):
+            logging.info(f"Manifold embedding found for module {module_idx}, k={k} — skipping UMAP")
+        else:
+            modules_need_umap.append(module_idx)
+
+    # Always run model forward pass (needed for PCA / scree plot)
     generator = TrajectoryGenerator()
     positions = generator.generate_trajectory(2, 2, 1000, 100)  # (B, L, 2), absolute
     positions_shifted = np.roll(positions, 1, axis=1)
@@ -838,18 +897,41 @@ def generate_2d_plots(model: nn.Module, k: int = 0, generate_manifold = False) -
 
     # Manifold analysis per module
     for module_idx in range(n_modules):
+        emb_artifact = f"manifold/k{k}/embedding_module{module_idx}.npy"
         module_mask = np.array(labels) == module_idx
         module_representations = representations[:, module_mask]
 
-        result = manifold(positions, module_representations, module_idx)
-        if result is not None:
-            manifold_fig, scree_fig, slice_xy, slice_xz, slice_yz, traj_fig, module_positions, module_embedding = result
-            log_figure(manifold_fig, f"manifold_module{module_idx}_k{k}")
-            log_figure(scree_fig, f"scree_module{module_idx}_k{k}")
-            log_figure(slice_xy, f"manifold_slice_xy_module{module_idx}_k{k}")
-            log_figure(slice_xz, f"manifold_slice_xz_module{module_idx}_k{k}")
-            log_figure(slice_yz, f"manifold_slice_yz_module{module_idx}_k{k}")
-            mlflow.log_figure(traj_fig, f"figures/trajectory_module{module_idx}_k{k}.png")
+        # Always compute PCA for scree plot
+        pca = PCA(n_components=0.95)
+        pcs = pca.fit_transform(module_representations)
+        n_components = len(pca.explained_variance_ratio_)
+        pc_numbers = list(range(1, n_components + 1))
+        scree_fig = go.Figure()
+        scree_fig.add_trace(go.Bar(x=pc_numbers, y=pca.explained_variance_ratio_ * 100, name='Individual', opacity=0.7))
+        scree_fig.add_trace(go.Scatter(
+            x=pc_numbers, y=np.cumsum(pca.explained_variance_ratio_) * 100,
+            mode='lines+markers', name='Cumulative',
+            marker=dict(color='red'), line=dict(color='red'),
+        ))
+        scree_fig.update_layout(
+            title=f'Scree Plot - Module {module_idx} ({n_components} components)',
+            xaxis_title='Principal Component', yaxis_title='Variance Explained (%)',
+            height=500, width=800,
+        )
+        log_figure(scree_fig, f"scree_module{module_idx}_k{k}")
+
+        if module_idx not in modules_need_umap:
+            # Load cached embedding, regenerate figures
+            module_embedding = _load_artifact_npy(emb_artifact)
+            if module_embedding is None:
+                logging.warning(f"Failed to load embedding for module {module_idx}, k={k} — skipping")
+                continue
+            module_positions = positions
+        else:
+            # Run full UMAP
+            reducer = umap.UMAP(n_components=3, metric='cosine', n_neighbors=500, min_dist=0.8, init='spectral', n_jobs=24)
+            module_embedding: NDArray[np.floating] = reducer.fit_transform(pcs)
+            module_positions = positions
             with tempfile.TemporaryDirectory() as tmpdir:
                 pos_path = f"{tmpdir}/positions_module{module_idx}.npy"
                 emb_path = f"{tmpdir}/embedding_module{module_idx}.npy"
@@ -857,6 +939,21 @@ def generate_2d_plots(model: nn.Module, k: int = 0, generate_manifold = False) -
                 np.save(emb_path, module_embedding)
                 mlflow.log_artifact(pos_path, artifact_path=f"manifold/k{k}")
                 mlflow.log_artifact(emb_path, artifact_path=f"manifold/k{k}")
+
+        manifold_fig = manifold_cloud(module_embedding, module_positions, module_idx, n_components)
+        slice_xy = manifold_slice(module_embedding, (0, 1), module_idx, n_components)
+        slice_xz = manifold_slice(module_embedding, (0, 2), module_idx, n_components)
+        slice_yz = manifold_slice(module_embedding, (1, 2), module_idx, n_components)
+        traj_fig, _ = TrajectoryGenerator().visualize_trajectory_time(
+            module_positions[0] if module_positions.ndim == 3 else module_positions,
+            title=f'Trajectory 0 - Module {module_idx}',
+            background='colormap', cmap='Wistia'
+        )
+        log_figure(manifold_fig, f"manifold_module{module_idx}_k{k}")
+        log_figure(slice_xy, f"manifold_slice_xy_module{module_idx}_k{k}")
+        log_figure(slice_xz, f"manifold_slice_xz_module{module_idx}_k{k}")
+        log_figure(slice_yz, f"manifold_slice_yz_module{module_idx}_k{k}")
+        mlflow.log_figure(traj_fig, f"figures/trajectory_module{module_idx}_k{k}.png")
 
     return scores
 
@@ -870,6 +967,7 @@ def sweep_boxplot(
     n_neurons_str: str,
     n_samples_str: str,
     log_x: bool = False,
+    x_label: Optional[str] = None,
 ) -> go.Figure:
     """Create a boxplot figure for sweep score distributions.
 
@@ -889,6 +987,7 @@ def sweep_boxplot(
     mean_key = f"{base_key}_mean"
     max_key = f"{base_key}_max"
 
+    x_label = x_label or x_param
     fig = make_subplots(
         rows=1, cols=2,
         subplot_titles=[
@@ -896,7 +995,6 @@ def sweep_boxplot(
             f"Max ({n_neurons_str}{n_samples_str})",
         ]
     )
-    fig.update_layout(title=f"Distribution of grid scores over runs<br>{base_title}")
 
     for col, key in enumerate([mean_key, max_key], start=1):
         for i, x_val in enumerate(x_values):
@@ -915,7 +1013,7 @@ def sweep_boxplot(
 
     if log_x:
         fig.update_xaxes(
-            title_text=x_param,
+            title_text=x_label,
             type="log",
             dtick=1,
             ticks="outside",
@@ -923,10 +1021,13 @@ def sweep_boxplot(
             showgrid=True,
             gridcolor="white",
             exponentformat="power",
+            title_font=dict(size=20), tickfont=dict(size=20),
         )
     else:
-        fig.update_xaxes(title_text=x_param)
-    fig.update_yaxes(title_text="Grid score")
+        fig.update_xaxes(title_text=x_label, title_font=dict(size=20), tickfont=dict(size=20))
+    fig.update_yaxes(title_text="Grid score", title_font=dict(size=20), tickfont=dict(size=20))
+    for ann in fig.layout.annotations:
+        ann.font.size = 24
     fig.update_layout(height=500, width=1000)
 
     return fig
@@ -941,6 +1042,7 @@ def sweep_violin_plot(
     n_neurons_str: str,
     n_samples_str: str,
     log_x: bool = False,
+    x_label: Optional[str] = None,
 ) -> go.Figure:
     """Create a violin plot figure for sweep score distributions.
 
@@ -960,6 +1062,7 @@ def sweep_violin_plot(
     mean_key = f"{base_key}_mean"
     max_key = f"{base_key}_max"
 
+    x_label = x_label or x_param
     fig = make_subplots(
         rows=1, cols=2,
         subplot_titles=[
@@ -967,7 +1070,6 @@ def sweep_violin_plot(
             f"Max ({n_neurons_str}{n_samples_str})",
         ]
     )
-    fig.update_layout(title=f"Distribution of grid scores over runs<br>{base_title}")
 
     for col, key in enumerate([mean_key, max_key], start=1):
         for i, x_val in enumerate(x_values):
@@ -988,7 +1090,7 @@ def sweep_violin_plot(
 
     if log_x:
         fig.update_xaxes(
-            title_text=x_param,
+            title_text=x_label,
             type="log",
             dtick=1,
             ticks="outside",
@@ -996,10 +1098,13 @@ def sweep_violin_plot(
             showgrid=True,
             gridcolor="white",
             exponentformat="power",
+            title_font=dict(size=20), tickfont=dict(size=20),
         )
     else:
-        fig.update_xaxes(title_text=x_param)
-    fig.update_yaxes(title_text="Grid score")
+        fig.update_xaxes(title_text=x_label, title_font=dict(size=20), tickfont=dict(size=20))
+    fig.update_yaxes(title_text="Grid score", title_font=dict(size=20), tickfont=dict(size=20))
+    for ann in fig.layout.annotations:
+        ann.font.size = 24
     fig.update_layout(height=500, width=1000)
 
     return fig
@@ -1014,6 +1119,7 @@ def sweep_iqr_plot(
     n_neurons_str: str,
     n_samples_str: str,
     log_x: bool = False,
+    x_label: Optional[str] = None,
 ) -> go.Figure:
     """Create a quantile (IQR) plot figure for sweep score distributions.
 
@@ -1033,6 +1139,7 @@ def sweep_iqr_plot(
     mean_key = f"{base_key}_mean"
     max_key = f"{base_key}_max"
 
+    x_label = x_label or x_param
     fig = make_subplots(
         rows=1, cols=2,
         subplot_titles=[
@@ -1040,7 +1147,6 @@ def sweep_iqr_plot(
             f"Max ({n_neurons_str}{n_samples_str})",
         ]
     )
-    fig.update_layout(title=f"Distribution of grid scores over runs<br>{base_title}")
 
     for col, key in enumerate([mean_key, max_key], start=1):
         data_array = np.array([scores[key][i] for i in range(len(x_values))])
@@ -1077,7 +1183,7 @@ def sweep_iqr_plot(
 
     if log_x:
         fig.update_xaxes(
-            title_text=x_param,
+            title_text=x_label,
             type="log",
             dtick=1,
             ticks="outside",
@@ -1085,10 +1191,13 @@ def sweep_iqr_plot(
             showgrid=True,
             gridcolor="white",
             exponentformat="power",
+            title_font=dict(size=20), tickfont=dict(size=20),
         )
     else:
-        fig.update_xaxes(title_text=x_param)
-    fig.update_yaxes(title_text="Grid score")
+        fig.update_xaxes(title_text=x_label, title_font=dict(size=20), tickfont=dict(size=20))
+    fig.update_yaxes(title_text="Grid score", title_font=dict(size=20), tickfont=dict(size=20))
+    for ann in fig.layout.annotations:
+        ann.font.size = 24
     fig.update_layout(height=500, width=1000)
 
     return fig
@@ -1233,20 +1342,260 @@ def sweep_score_distributions_mlflow(
             size, angle = base_key.split("_")
             base_title = f"{size_map.get(size, size)} ratemap, {angle}° angle"
 
+            x_label = "Sequence length" if x_param == "data.seq_len" else x_param
+
             # Boxplot
-            fig_box = sweep_boxplot(scores, x_values, x_param, base_key, base_title, n_neurons_str, n_samples_str, log_x=log_x)
+            fig_box = sweep_boxplot(scores, x_values, x_param, base_key, base_title, n_neurons_str, n_samples_str, log_x=log_x, x_label=x_label)
             log_figure(fig_box, f"sweep_boxplot_{base_key}")
             figures[f"boxplot_{base_key}"] = fig_box
 
             # Violin plot
-            fig_violin = sweep_violin_plot(scores, x_values, x_param, base_key, base_title, n_neurons_str, n_samples_str, log_x=log_x)
+            fig_violin = sweep_violin_plot(scores, x_values, x_param, base_key, base_title, n_neurons_str, n_samples_str, log_x=log_x, x_label=x_label)
             log_figure(fig_violin, f"sweep_violin_{base_key}")
             figures[f"violin_{base_key}"] = fig_violin
 
             # Quantile plot
-            fig_iqr = sweep_iqr_plot(scores, x_values, x_param, base_key, base_title, n_neurons_str, n_samples_str, log_x=log_x)
+            fig_iqr = sweep_iqr_plot(scores, x_values, x_param, base_key, base_title, n_neurons_str, n_samples_str, log_x=log_x, x_label=x_label)
             log_figure(fig_iqr, f"sweep_quantile_{base_key}")
             figures[f"quantile_{base_key}"] = fig_iqr
 
     print(f"Sweep score distribution plots logged to MLflow for run {parent_run_id}")
     return figures
+
+
+def sweep_heatmap_2d(
+    mean_grid: dict[tuple[float, float], list[float]],
+    max_grid: dict[tuple[float, float], list[float]],
+    x_label: str,
+    y_label: str,
+) -> go.Figure:
+    """Create a 2D heatmap for a two-parameter sweep.
+
+    Args:
+        mean_grid: Dict mapping (x_val, y_val) -> list of mean-scores across runs.
+        max_grid: Dict mapping (x_val, y_val) -> list of max-scores across runs.
+        x_label: Label for x-axis parameter.
+        y_label: Label for y-axis parameter.
+
+    Returns:
+        Plotly figure with two heatmap subplots (mean of means | mean of maxes).
+    """
+    all_keys = set(mean_grid) | set(max_grid)
+    xs = sorted(set(x for x, y in all_keys))
+    ys = sorted(set(y for x, y in all_keys))
+    # Use string labels so Plotly treats axes as categorical → equal cell sizes
+    xs_str = [str(x) for x in xs]
+    ys_str = [str(y) for y in ys]
+
+    def build_matrix(grid: dict[tuple[float, float], list[float]]) -> list[list[float]]:
+        return [
+            [float(np.mean(grid[(x, y)])) if (x, y) in grid and grid[(x, y)] else float("nan") for x in xs]
+            for y in ys
+        ]
+
+    def fmt(v: float) -> str:
+        return "" if np.isnan(v) else f"{v:.3f}"
+
+    mean_matrix = build_matrix(mean_grid)
+    max_matrix = build_matrix(max_grid)
+    mean_text = [[fmt(v) for v in row] for row in mean_matrix]
+    max_text = [[fmt(v) for v in row] for row in max_matrix]
+
+    fig = make_subplots(rows=1, cols=2, subplot_titles=["Mean Scores", "Max Scores"],
+                        horizontal_spacing=0.12)
+
+    for col, (matrix, text) in enumerate([(mean_matrix, mean_text), (max_matrix, max_text)], start=1):
+        fig.add_trace(
+            go.Heatmap(
+                x=xs_str, y=ys_str, z=matrix,
+                text=text, texttemplate="%{text}",
+                colorscale="RdBu_r", zmin=-2, zmax=2,
+                showscale=(col == 2),
+                colorbar=dict(tickfont=dict(size=16)),
+            ),
+            row=1, col=col,
+        )
+
+    fig.update_xaxes(title_text=x_label, title_font=dict(size=20), tickfont=dict(size=16))
+    fig.update_yaxes(title_text=y_label, title_font=dict(size=20), tickfont=dict(size=16))
+    for ann in fig.layout.annotations:
+        ann.font.size = 24
+    fig.update_layout(height=500, width=1000)
+    return fig
+
+
+def sweep_score_distributions_mlflow_2d(
+    parent_run_id: str,
+    x_param: str = "model.sigma_1",
+    y_param: str = "model.sigma_2",
+    tracking_uri: Optional[str] = "sqlite:///mlruns.db",
+) -> dict[str, go.Figure]:
+    """Generate 2D heatmap plots of grid scores for a two-parameter sweep.
+
+    Args:
+        parent_run_id: MLflow run ID of the parent sweep run.
+        x_param: Config parameter path for x-axis (e.g., 'model.sigma_1').
+        y_param: Config parameter path for y-axis (e.g., 'model.sigma_2').
+        tracking_uri: MLflow tracking URI.
+
+    Returns:
+        Dictionary mapping plot names to figure objects.
+    """
+    if tracking_uri:
+        mlflow.set_tracking_uri(tracking_uri)
+    client = MlflowClient()
+    figures: dict[str, go.Figure] = {}
+
+    parent_run = client.get_run(parent_run_id)
+    experiment_id = parent_run.info.experiment_id
+
+    child_runs = client.search_runs(
+        experiment_ids=[experiment_id],
+        filter_string=f"tags.mlflow.parentRunId = '{parent_run_id}'",
+    )
+
+    if not child_runs:
+        print(f"No child runs found for parent {parent_run_id}")
+        return figures
+
+    # Determine available metric keys
+    metric_keys = []
+    for run in child_runs:
+        metric_keys = [k for k in run.data.metrics if "/" in k and any(
+            k.endswith(s) for s in ["_mean", "_max"]
+        )]
+        if metric_keys:
+            break
+
+    if not metric_keys:
+        print("No child runs have grid score metrics")
+        return figures
+
+    base_metric_names = {mk.split("/")[1] for mk in metric_keys if len(mk.split("/")) == 2}
+
+    # grid[(x_val, y_val)][base_name] = [scores across k]
+    grid: dict[tuple[float, float], dict[str, list[float]]] = {}
+
+    for run in child_runs:
+        try:
+            params = run.data.params
+            tags = run.data.tags
+            # Try params first, then tags
+            x_raw = params.get(x_param) or tags.get(f"param.{x_param}")
+            y_raw = params.get(y_param) or tags.get(f"param.{y_param}")
+            if x_raw is None or y_raw is None:
+                continue
+            x_val = float(x_raw)
+            y_val = float(y_raw)
+        except Exception as e:
+            print(f"Could not read tags for run {run.info.run_id}: {e}")
+            continue
+
+        metrics = run.data.metrics
+        if not any(k.endswith("_mean") or k.endswith("_max") for k in metrics):
+            continue
+
+        key = (x_val, y_val)
+        if key not in grid:
+            grid[key] = {name: [] for name in base_metric_names}
+            grid[key]["n_modules"] = []
+
+        for base_name in base_metric_names:
+            k = 0
+            while True:
+                metric_key = f"k{k}/{base_name}"
+                if metric_key in metrics:
+                    grid[key][base_name].append(metrics[metric_key])
+                    k += 1
+                else:
+                    break
+
+        k = 0
+        while True:
+            if f"k{k}/n_modules" in metrics:
+                grid[key]["n_modules"].append(metrics[f"k{k}/n_modules"])
+                k += 1
+            else:
+                break
+
+    if not grid:
+        print("No valid data collected from child runs")
+        return figures
+
+    base_keys = sorted(set(
+        "_".join(name.split("_")[:2]) for name in base_metric_names
+        if name.endswith("_mean") or name.endswith("_max")
+    ))
+    size_map = {"sm": "Small", "md": "Medium", "lg": "Large"}
+
+    _param_labels = {
+        "loss.sigma_sq": "σ²",
+        "loss.sigma_theta": "σ<sub>θ</sub>",
+        "model.sigma_sq": "σ²",
+        "model.sigma_theta": "σ<sub>θ</sub>",
+    }
+    x_label = _param_labels.get(x_param, x_param.split(".")[-1])
+    y_label = _param_labels.get(y_param, y_param.split(".")[-1])
+
+    with mlflow.start_run(run_id=parent_run_id):
+        for base_key in base_keys:
+            mean_key = f"{base_key}_mean"
+            max_key = f"{base_key}_max"
+            if mean_key not in base_metric_names and max_key not in base_metric_names:
+                continue
+
+            size, angle = base_key.split("_")
+            base_title = f"{size_map.get(size, size)} ratemap, {angle}° angle"
+
+            mean_grid: dict[tuple[float, float], list[float]] = {
+                k: v[mean_key] for k, v in grid.items() if mean_key in v and v[mean_key]
+            }
+            max_grid: dict[tuple[float, float], list[float]] = {
+                k: v[max_key] for k, v in grid.items() if max_key in v and v[max_key]
+            }
+
+            fig = sweep_heatmap_2d(mean_grid, max_grid, x_label, y_label)
+            log_figure(fig, f"sweep_heatmap2d_{base_key}")
+            figures[f"heatmap2d_{base_key}"] = fig
+
+        # n_modules heatmap (once, not per base_key)
+        if base_keys:
+            n_modules_grid: dict[tuple[float, float], list[float]] = {
+                k: v["n_modules"] for k, v in grid.items() if v.get("n_modules")
+            }
+            if n_modules_grid:
+                fig_nm = sweep_n_modules_heatmap_2d(n_modules_grid, x_label, y_label)
+                log_figure(fig_nm, "sweep_heatmap2d_n_modules")
+                figures["heatmap2d_n_modules"] = fig_nm
+
+    print(f"2D sweep heatmap plots logged to MLflow for run {parent_run_id}")
+    return figures
+
+
+def sweep_n_modules_heatmap_2d(
+    grid: dict[tuple[float, float], list[float]],
+    x_label: str,
+    y_label: str,
+) -> go.Figure:
+    """2D heatmap of mean number of modules across k iterations per parameter cell."""
+    xs = sorted(set(x for x, y in grid))
+    ys = sorted(set(y for x, y in grid))
+    xs_str = [str(x) for x in xs]
+    ys_str = [str(y) for y in ys]
+
+    matrix = [
+        [float(np.mean(grid[(x, y)])) if (x, y) in grid and grid[(x, y)] else float("nan") for x in xs]
+        for y in ys
+    ]
+    text = [["" if np.isnan(v) else f"{v:.1f}" for v in row] for row in matrix]
+
+    fig = go.Figure(go.Heatmap(
+        x=xs_str, y=ys_str, z=matrix,
+        text=text, texttemplate="%{text}",
+        colorscale="Reds",
+        colorbar=dict(tickfont=dict(size=16)),
+    ))
+    fig.update_xaxes(title_text=x_label, title_font=dict(size=20), tickfont=dict(size=16))
+    fig.update_yaxes(title_text=y_label, title_font=dict(size=20), tickfont=dict(size=16))
+    fig.update_layout(title="Mean number of modules", height=500, width=600)
+    return fig
