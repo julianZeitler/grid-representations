@@ -112,9 +112,9 @@ def demo_embedding(omega, theta, thresh, omega_MA):
     ps = np.linspace(0, 1, 200)
     xs = encode(ps, omega, theta, thresh)  # (200, N)
 
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
 
-    # (a) Similarity kernel K(Δp)
+    # (a) Similarity kernel K(Δx)
     p_ref = 0.5
     x_ref = encode(np.array([p_ref]), omega, theta, thresh)[0]
     deltas = np.linspace(-0.15, 0.15, 300)
@@ -124,21 +124,15 @@ def demo_embedding(omega, theta, thresh, omega_MA):
         sim = (x_ref * x_dp).sum() / (np.linalg.norm(x_ref) * np.linalg.norm(x_dp) + 1e-8)
         similarities.append(sim)
     axes[0].plot(deltas, similarities)
-    axes[0].set_xlabel("Δp (m)")
-    axes[0].set_ylabel("Cosine similarity K(Δp)")
-    axes[0].set_title(f"Similarity kernel (ω_MA={omega_MA})")
+    axes[0].set_xlabel("Δx (m)", fontsize=18)
+    axes[0].set_ylabel("cosine similarity", fontsize=18)
+    axes[0].tick_params(labelsize=16)
 
     # (b) State matrix (positions × neurons, first 64)
-    axes[1].imshow(xs[:, :64].T, aspect='auto', cmap='hot', extent=[0, 1, 64, 0])
-    axes[1].set_xlabel("Position p (m)")
-    axes[1].set_ylabel("Neuron index (first 64)")
-    axes[1].set_title("Real-valued state vectors x(p)")
-
-    # (c) Mean activity
-    axes[2].plot(ps, xs.mean(axis=1))
-    axes[2].set_xlabel("Position p (m)")
-    axes[2].set_ylabel("Mean activity")
-    axes[2].set_title("Mean activity per position")
+    axes[1].imshow(xs[:, :64].T, aspect='auto', cmap='viridis', extent=[0, 1, 64, 0])
+    axes[1].set_xlabel("x (m)", fontsize=18)
+    axes[1].set_ylabel("neuron index", fontsize=18)
+    axes[1].tick_params(labelsize=16)
 
     plt.tight_layout()
     mlflow.log_figure(fig, "embedding.png")
@@ -205,7 +199,7 @@ def demo_alpha_sweep(omega, theta, thresh, A, alphas, n_steps, n_init):
     for col in range(3):
         axes[-1, col].set_xlabel("Time step")
 
-    fig.suptitle("On-manifold gradient descent: varying α", fontsize=13)
+    fig.suptitle("On-manifold gradient descent: varying α", fontsize=18)
     plt.tight_layout()
     mlflow.log_figure(fig, "alpha_sweep.png")
     plt.close()
@@ -244,7 +238,7 @@ def demo_noise(omega, theta, thresh, A, alpha, noise_levels, n_steps, n_init):
     for col in range(2):
         axes[-1, col].set_xlabel("Time step")
 
-    fig.suptitle(f"Noise robustness (α={alpha})", fontsize=13)
+    fig.suptitle(f"Noise robustness (α={alpha})", fontsize=18)
     plt.tight_layout()
     mlflow.log_figure(fig, "noise_robustness.png")
     plt.close()
@@ -300,14 +294,12 @@ def demo_trajectories(omega, theta, thresh, A, ps_dense, E_landscape,
             ax.axvline(x=p0, color='green', linewidth=0.8, linestyle='--', alpha=0.6)
 
             if row == 0:
-                ax.set_title(f"p₀ = {p0:.2f}", fontsize=10)
+                ax.set_title(f"x₀ = {p0:.2f}", fontsize=18)
             if col == 0:
-                ax.set_ylabel(f"noise = {noise}\nE(p) (norm.)", fontsize=9)
+                ax.set_ylabel(f"noise = {noise}\nE(x) (norm.)", fontsize=18)
             if row == n_rows - 1:
-                ax.set_xlabel("Position p (m)")
-
-    title_om = f", ω_MA={omega_MA}" if omega_MA is not None else ""
-    fig.suptitle(f"Trajectories on energy landscape (α={alpha}{title_om})", fontsize=12)
+                ax.set_xlabel("x (m)", fontsize=18)
+            ax.tick_params(labelsize=16)
     plt.tight_layout()
     mlflow.log_figure(fig, "trajectories.png")
     plt.close()
@@ -333,32 +325,28 @@ def demo_omega_sweep(omega_MAs, alpha, noise_std, n_steps, n_init, n_weight_step
         E_norm = (E_land - E_land.mean()) / (E_land.std() + 1e-10)
         axes[row, 0].plot(E_norm, ps_dense, linewidth=0.8)
         axes[row, 0].set_ylim(-0.05, 1.05)
-        axes[row, 0].set_ylabel(f"ω_MA={om}\nPosition p (m)")
+        axes[row, 0].set_ylabel(f"ω_MA={om}\nx (m)", fontsize=18)
+        axes[row, 0].tick_params(labelsize=16)
         for tick in axes[row, 0].get_yticks():
             axes[row, 0].axhline(tick, color='gray', linewidth=0.4, alpha=0.5, linestyle=(0, (5, 10)), zorder=0)
-        if row == 0:
-            axes[row, 0].set_title("Energy landscape (normalized)")
 
         rng = np.random.default_rng(42)
-        for p0 in init_positions:
-            p = p0
-            positions = [p]
+        for x0 in init_positions:
+            x = x0
+            positions = [x]
             for _ in range(n_steps):
-                p = step_gradient(p, oA, o, t, th, alpha=alpha,
+                x = step_gradient(x, oA, o, t, th, alpha=alpha,
                                   noise_std=noise_std, rng=rng)
-                positions.append(p)
+                positions.append(x)
             axes[row, 1].plot(positions, alpha=0.5, linewidth=0.8)
         axes[row, 1].set_ylim(-0.05, 1.05)
+        axes[row, 1].tick_params(labelsize=16)
         for tick in axes[row, 1].get_yticks():
             axes[row, 1].axhline(tick, color='gray', linewidth=0.4, alpha=0.5, linestyle=(0, (5, 10)), zorder=0)
-        if row == 0:
-            axes[row, 1].set_title(f"Position trajectories (noise={noise_std})")
 
-    axes[-1, 0].set_xlabel("E(p) (normalized)")
-    axes[-1, 1].set_xlabel("Time step")
+    axes[-1, 0].set_xlabel("E(x) (normalized)", fontsize=18)
+    axes[-1, 1].set_xlabel("Time step", fontsize=18)
 
-    fig.suptitle("Resolution vs ω_MA: higher frequency → more minima → tighter pinning",
-                 fontsize=13)
     plt.tight_layout()
     mlflow.log_figure(fig, "omega_sweep.png")
     plt.close()

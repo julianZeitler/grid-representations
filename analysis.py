@@ -209,8 +209,12 @@ def manifold_cloud(
         ))
 
     fig.update_layout(
-        title=f"Manifold Embedding (colored by 2D position) - Module {m} ({n_components} components)",
         showlegend=False,
+        scene=dict(
+            xaxis=dict(title=dict(text="x", font=dict(size=20)), showticklabels=False),
+            yaxis=dict(title=dict(text="y", font=dict(size=20)), showticklabels=False),
+            zaxis=dict(title=dict(text="z", font=dict(size=20)), showticklabels=False),
+        ),
     )
     return fig
 
@@ -256,8 +260,8 @@ def manifold_slice(
     fig.update_layout(
         xaxis_title=f"{axis_labels[ax0]}",
         yaxis_title=f"{axis_labels[ax1]}",
-        xaxis=dict(scaleanchor='y', scaleratio=1, title_font=dict(size=20), tickfont=dict(size=20)),
-        yaxis=dict(title_font=dict(size=20), tickfont=dict(size=20)),
+        xaxis=dict(scaleanchor='y', scaleratio=1, showticklabels=False, title=axis_labels[ax0], title_font=dict(size=20)),
+        yaxis=dict(showticklabels=False, title=axis_labels[ax1], title_font=dict(size=20)),
         height=600,
         width=600,
     )
@@ -331,7 +335,6 @@ def manifold(
 
     traj_fig, _ = TrajectoryGenerator().visualize_trajectory_time(
         positions[traj_idx] if positions.ndim == 3 else positions,
-        title=f'Trajectory {traj_idx} - Module {m}',
         background='colormap', cmap='Wistia'
     )
 
@@ -591,12 +594,13 @@ def module_ratemaps_plot(
     return fig
 
 
-def log_figure(fig: go.Figure, name: str) -> None:
-    """Log a plotly figure to MLflow in both PNG and HTML formats."""
+def log_figure(fig: go.Figure | MplFigure, name: str) -> None:
+    """Log a figure to MLflow. Plotly: PNG + HTML. Matplotlib: PNG only."""
     for logger_name in ('kaleido', 'choreographer'):
         logging.getLogger(logger_name).setLevel(logging.WARNING)
     mlflow.log_figure(fig, f"figures/{name}.png")
-    mlflow.log_figure(fig, f"figures/{name}.html")
+    if isinstance(fig, go.Figure):
+        mlflow.log_figure(fig, f"figures/{name}.html")
 
 
 def create_loss_plots_from_mlflow(k: int) -> None:
@@ -721,44 +725,175 @@ def grid_type(
     grid_scores_60: NDArray[np.floating],
     grid_scores_90: NDArray[np.floating],
     modules: NDArray[np.intp],
-) -> go.Figure:
-    n_modules = int(max(modules)) + 1
-    colors = [f'hsl({int(m * 360 / n_modules)}, 70%, 50%)' for m in range(n_modules)]
+) -> MplFigure:
+    import matplotlib.pyplot as plt
 
-    fig = go.Figure()
+    n_modules = int(max(modules)) + 1
+    colors = plt.cm.hsv(np.linspace(0, 1, n_modules, endpoint=False))
+
+    raw_lo = min(grid_scores_90.min(), grid_scores_60.min())
+    raw_hi = max(grid_scores_90.max(), grid_scores_60.max())
+    pad = 0.05 * (raw_hi - raw_lo)
+    lo = raw_lo - pad
+    hi = raw_hi + pad
+
+    fig, ax = plt.subplots(figsize=(6, 6))
 
     for m in range(n_modules):
         mask = modules == m
-        fig.add_trace(go.Scatter(
-            x=grid_scores_90[mask],
-            y=grid_scores_60[mask],
-            mode='markers',
-            marker=dict(color=colors[m], size=5, opacity=0.7),
-            name=f'Module {m}',
-        ))
+        ax.scatter(grid_scores_90[mask], grid_scores_60[mask],
+                   color=colors[m], s=15, alpha=0.7, label=f'Module {m}')
 
-    # Dashed diagonal
-    lo = min(grid_scores_90.min(), grid_scores_60.min())
-    hi = max(grid_scores_90.max(), grid_scores_60.max())
-    fig.add_trace(go.Scatter(
-        x=[lo, hi],
-        y=[lo, hi],
-        mode='lines',
-        line=dict(dash='dash', color='grey', width=1),
-        showlegend=False,
-    ))
+    ax.plot([lo, hi], [lo, hi], '--', color='grey', linewidth=1)
+    ax.set_xlim(lo, hi)
+    ax.set_ylim(lo, hi)
+    ax.set_aspect('equal')
+    ax.grid(True, linestyle='--', linewidth=0.5, alpha=0.5)
+    ax.set_xlabel('Grid score (90°)', fontsize=14)
+    ax.set_ylabel('Grid score (60°)', fontsize=14)
+    legend_fontsize = max(6, 12 - max(0, n_modules - 10))
+    ax.legend(fontsize=legend_fontsize, bbox_to_anchor=(1.01, 1), loc='upper left', borderaxespad=0, frameon=False)
+    fig.tight_layout(pad=0)
 
+    return fig
+
+
+def _barcode_figure(
+    dgms: list,
+    module_idx: int,
+    k: int,
+    n_landmarks: int,
+    n_pcs: int,
+) -> go.Figure:
+    dim_colors = ['steelblue', 'tomato', 'forestgreen']
+    dim_names = ['H\u2080', 'H\u2081', 'H\u2082']
+
+    all_finite_deaths = [
+        d for dgm in dgms for d in dgm[np.isfinite(dgm[:, 1]), 1].tolist()
+    ]
+    x_max = max(all_finite_deaths) * 1.05 if all_finite_deaths else 1.0
+
+    fig = make_subplots(
+        rows=3, cols=1,
+        subplot_titles=dim_names,
+        vertical_spacing=0.06,
+        shared_xaxes=True,
+    )
+
+    for dim, (dgm, color) in enumerate(zip(dgms, dim_colors)):
+        if len(dgm) == 0:
+            continue
+        lifetimes = dgm[:, 1] - dgm[:, 0]
+        top30_idx = np.argsort(lifetimes)[::-1][:30]
+        dgm_top = dgm[top30_idx]
+
+        for i, (birth, death) in enumerate(dgm_top):
+            death_plot = x_max if not np.isfinite(death) else death
+            y = i * 1.5
+            fig.add_trace(
+                go.Scatter(
+                    x=[birth, death_plot],
+                    y=[y, y],
+                    mode='lines',
+                    line=dict(color=color, width=2),
+                    showlegend=False,
+                ),
+                row=dim + 1, col=1,
+            )
+
+    fig.update_xaxes(
+        title_text='Filtration value', range=[0, x_max],
+        row=3, col=1,
+        title_font=dict(size=16), tickfont=dict(size=14),
+    )
+    for dim in range(3):
+        fig.update_yaxes(
+            showticklabels=False, showgrid=False, zeroline=False,
+            row=dim + 1, col=1,
+        )
+    for ann in fig.layout.annotations:
+        ann.font.size = 18
     fig.update_layout(
-        xaxis_title='Grid score (90°)',
-        yaxis_title='Grid score (60°)',
-        xaxis=dict(range=[lo, hi], title_font=dict(size=20), tickfont=dict(size=20)),
-        yaxis=dict(range=[lo, hi], scaleanchor='x', scaleratio=1, title_font=dict(size=20), tickfont=dict(size=20)),
-        legend=dict(font=dict(size=20)),
-        font=dict(size=20),
-        width=600,
-        height=600,
+        height=500, width=400,
+        showlegend=False,
+        margin=dict(l=10, r=10, t=30, b=10),
     )
     return fig
+
+
+def persistent_homology_analysis(
+    pcs: NDArray[np.floating],
+    module_idx: int,
+    k: int,
+    n_landmarks: int = 500,
+    thresh: float = np.inf,
+) -> tuple[go.Figure, dict]:
+    """Verify torus topology via persistent cohomology on PCA space.
+
+    Follows Gardner et al.: apply Ripser to the PCA intermediate representation
+    (not the UMAP output), using landmark-based (maxmin) downsampling and
+    Z_47 coefficients. Expected torus signature: \u03b2=(1,2,1).
+
+    Args:
+        pcs: PCA-projected activations for one module, shape (N, n_components).
+        module_idx: Module index for labeling.
+        k: Run index for labeling.
+        n_landmarks: Target number of maxmin landmark points (default 500).
+        thresh: Max filtration radius passed to ripser; caps simplex explosion at maxdim=2.
+
+    Returns:
+        Tuple of (barcode_figure, metrics_dict).
+    """
+    try:
+        from ripser import Rips
+    except ImportError:
+        logging.warning('ripser not installed — skipping persistent homology analysis')
+        return go.Figure(), {}
+
+    n_pc = pcs.shape[1]
+
+    # --- Maxmin landmark subsampling + Ripser with Z_47 coefficients ---
+    # Rips(n_perm=n_lm) runs a greedy furthest-point permutation internally,
+    # selecting n_lm landmarks from the point cloud before building the filtration.
+    N = pcs.shape[0]
+    n_lm = min(n_landmarks, N)
+
+    rips = Rips(maxdim=2, coeff=47, n_perm=n_lm, thresh=thresh, verbose=False)
+    dgms = rips.fit_transform(pcs, metric='cosine')
+
+    # --- 5. Parse barcodes and compute torus metrics ---
+    metrics: dict[str, float] = {}
+
+    def _sorted_lifetimes(dgm: NDArray) -> NDArray:
+        lt = dgm[:, 1] - dgm[:, 0]
+        return np.sort(lt[np.isfinite(lt)])[::-1]
+
+    h0_lt = _sorted_lifetimes(dgms[0])
+    h1_lt = _sorted_lifetimes(dgms[1])
+    h2_lt = _sorted_lifetimes(dgms[2]) if len(dgms) > 2 else np.array([])
+
+    # Torus ratio: second-longest H1 / third-longest H1 — large = clean torus signal
+    if len(h1_lt) >= 3 and h1_lt[2] > 0:
+        h1_torus_ratio = float(h1_lt[1] / h1_lt[2])
+    elif len(h1_lt) >= 2:
+        h1_torus_ratio = float('inf')
+    else:
+        h1_torus_ratio = 0.0
+
+    prefix = f'k{k}/topo_m{module_idx}'
+    metrics[f'{prefix}_h0_bars']         = float(len(dgms[0]))
+    metrics[f'{prefix}_h1_bars']         = float(len(dgms[1]))
+    metrics[f'{prefix}_h2_bars']         = float(len(dgms[2])) if len(dgms) > 2 else 0.0
+    metrics[f'{prefix}_h1_bar1']         = float(h1_lt[0]) if len(h1_lt) > 0 else 0.0
+    metrics[f'{prefix}_h1_bar2']         = float(h1_lt[1]) if len(h1_lt) > 1 else 0.0
+    metrics[f'{prefix}_h1_bar3']         = float(h1_lt[2]) if len(h1_lt) > 2 else 0.0
+    metrics[f'{prefix}_h1_torus_ratio']  = h1_torus_ratio if np.isfinite(h1_torus_ratio) else -1.0
+    metrics[f'{prefix}_h2_bar1']         = float(h2_lt[0]) if len(h2_lt) > 0 else 0.0
+    metrics[f'{prefix}_n_pcs']       = float(n_pc)
+    metrics[f'{prefix}_n_landmarks'] = float(n_lm)
+
+    fig = _barcode_figure(dgms, module_idx, k, n_lm, n_pc)
+    return fig, metrics
 
 
 def generate_2d_plots(model: nn.Module, k: int = 0, generate_manifold = False) -> dict:
@@ -843,8 +978,9 @@ def generate_2d_plots(model: nn.Module, k: int = 0, generate_manifold = False) -
     module_fig = module_ratemaps_plot(V_large, res, scores["lg_60"], labels)
     log_figure(module_fig, f"module_ratemaps_k{k}")
 
-    grid_type_fig = grid_type(scores["lg_60"], scores["lg_90"], np.array(labels))
-    log_figure(grid_type_fig, f"grid_type_k{k}")
+    for prefix in ["sm", "md", "lg"]:
+        grid_type_fig = grid_type(scores[f"{prefix}_60"], scores[f"{prefix}_90"], np.array(labels))
+        log_figure(grid_type_fig, f"grid_type_{prefix}_k{k}")
 
     if not generate_manifold:
         return scores
@@ -895,6 +1031,8 @@ def generate_2d_plots(model: nn.Module, k: int = 0, generate_manifold = False) -
     B, L, D = representations.shape
     representations = representations.reshape(B * L, D)
 
+    torus_ratios: list[float] = []
+
     # Manifold analysis per module
     for module_idx in range(n_modules):
         emb_artifact = f"manifold/k{k}/embedding_module{module_idx}.npy"
@@ -919,6 +1057,13 @@ def generate_2d_plots(model: nn.Module, k: int = 0, generate_manifold = False) -
             height=500, width=800,
         )
         log_figure(scree_fig, f"scree_module{module_idx}_k{k}")
+
+        # Persistent homology on PCA space (before UMAP)
+        topo_fig, topo_metrics = persistent_homology_analysis(pcs, module_idx, k)
+        log_figure(topo_fig, f"persistence_barcodes_module{module_idx}_k{k}")
+        for metric_key, metric_val in topo_metrics.items():
+            mlflow.log_metric(metric_key, metric_val)
+        torus_ratios.append(topo_metrics.get(f'k{k}/topo_m{module_idx}_h1_torus_ratio', 0.0))
 
         if module_idx not in modules_need_umap:
             # Load cached embedding, regenerate figures
@@ -946,7 +1091,6 @@ def generate_2d_plots(model: nn.Module, k: int = 0, generate_manifold = False) -
         slice_yz = manifold_slice(module_embedding, (1, 2), module_idx, n_components)
         traj_fig, _ = TrajectoryGenerator().visualize_trajectory_time(
             module_positions[0] if module_positions.ndim == 3 else module_positions,
-            title=f'Trajectory 0 - Module {module_idx}',
             background='colormap', cmap='Wistia'
         )
         log_figure(manifold_fig, f"manifold_module{module_idx}_k{k}")
@@ -954,6 +1098,30 @@ def generate_2d_plots(model: nn.Module, k: int = 0, generate_manifold = False) -
         log_figure(slice_xz, f"manifold_slice_xz_module{module_idx}_k{k}")
         log_figure(slice_yz, f"manifold_slice_yz_module{module_idx}_k{k}")
         mlflow.log_figure(traj_fig, f"figures/trajectory_module{module_idx}_k{k}.png")
+
+    # Torus ratio summary across modules
+    if torus_ratios:
+        ratio_fig = go.Figure(go.Bar(
+            x=list(range(len(torus_ratios))),
+            y=[r if r >= 0 else float('nan') for r in torus_ratios],
+            marker_color='steelblue',
+            text=['∞' if r < 0 else f'{r:.2f}' for r in torus_ratios],
+            textposition='auto',
+        ))
+        ratio_fig.update_layout(
+            yaxis_title='Torus ratio ξ',
+            xaxis_title='Module',
+            yaxis=dict(title_font=dict(size=18), tickfont=dict(size=16)),
+            xaxis=dict(
+                title_font=dict(size=18), tickfont=dict(size=16),
+                tickmode='array',
+                tickvals=list(range(len(torus_ratios))),
+                ticktext=[str(i) for i in range(len(torus_ratios))],
+            ),
+            height=300, width=400,
+            margin=dict(l=10, r=10, t=10, b=10),
+        )
+        log_figure(ratio_fig, f"torus_ratio_k{k}")
 
     return scores
 
@@ -991,8 +1159,8 @@ def sweep_boxplot(
     fig = make_subplots(
         rows=1, cols=2,
         subplot_titles=[
-            f"Mean ({n_neurons_str}{n_samples_str})",
-            f"Max ({n_neurons_str}{n_samples_str})",
+            f"Mean ({n_neurons_str.strip()})",
+            f"Max ({n_neurons_str.strip()})",
         ]
     )
 
@@ -1005,7 +1173,9 @@ def sweep_boxplot(
                     x=[x_val] * len(data),
                     name=str(x_val),
                     showlegend=False,
-                    marker_color="steelblue",
+                    marker_color="black",
+                    fillcolor="white",
+                    line=dict(color="black", width=1),
                     boxpoints="outliers",
                 ),
                 row=1, col=col
@@ -1013,7 +1183,7 @@ def sweep_boxplot(
 
     if log_x:
         fig.update_xaxes(
-            title_text=x_label,
+            title_text=f"{x_label} (log scale)",
             type="log",
             dtick=1,
             ticks="outside",
@@ -1021,14 +1191,14 @@ def sweep_boxplot(
             showgrid=True,
             gridcolor="white",
             exponentformat="power",
-            title_font=dict(size=20), tickfont=dict(size=20),
+            title_font=dict(size=20), tickfont=dict(size=16),
         )
     else:
-        fig.update_xaxes(title_text=x_label, title_font=dict(size=20), tickfont=dict(size=20))
-    fig.update_yaxes(title_text="Grid score", title_font=dict(size=20), tickfont=dict(size=20))
+        fig.update_xaxes(title_text=x_label, title_font=dict(size=20), tickfont=dict(size=16))
+    fig.update_yaxes(title_text="Grid score", title_font=dict(size=20), tickfont=dict(size=16), range=[-0.5, 2])
     for ann in fig.layout.annotations:
         ann.font.size = 24
-    fig.update_layout(height=500, width=1000)
+    fig.update_layout(height=400, width=1000, margin=dict(l=10, r=10, t=40, b=10))
 
     return fig
 
@@ -1066,8 +1236,8 @@ def sweep_violin_plot(
     fig = make_subplots(
         rows=1, cols=2,
         subplot_titles=[
-            f"Mean ({n_neurons_str}{n_samples_str})",
-            f"Max ({n_neurons_str}{n_samples_str})",
+            f"Mean ({n_neurons_str.strip()})",
+            f"Max ({n_neurons_str.strip()})",
         ]
     )
 
@@ -1098,14 +1268,14 @@ def sweep_violin_plot(
             showgrid=True,
             gridcolor="white",
             exponentformat="power",
-            title_font=dict(size=20), tickfont=dict(size=20),
+            title_font=dict(size=20), tickfont=dict(size=16),
         )
     else:
-        fig.update_xaxes(title_text=x_label, title_font=dict(size=20), tickfont=dict(size=20))
-    fig.update_yaxes(title_text="Grid score", title_font=dict(size=20), tickfont=dict(size=20))
+        fig.update_xaxes(title_text=x_label, title_font=dict(size=20), tickfont=dict(size=16))
+    fig.update_yaxes(title_text="Grid score", title_font=dict(size=20), tickfont=dict(size=16), range=[-0.5, 2])
     for ann in fig.layout.annotations:
         ann.font.size = 24
-    fig.update_layout(height=500, width=1000)
+    fig.update_layout(height=400, width=1000, margin=dict(l=10, r=10, t=40, b=10))
 
     return fig
 
@@ -1143,8 +1313,8 @@ def sweep_iqr_plot(
     fig = make_subplots(
         rows=1, cols=2,
         subplot_titles=[
-            f"Mean ({n_neurons_str}{n_samples_str})",
-            f"Max ({n_neurons_str}{n_samples_str})",
+            f"Mean ({n_neurons_str.strip()})",
+            f"Max ({n_neurons_str.strip()})",
         ]
     )
 
@@ -1191,14 +1361,14 @@ def sweep_iqr_plot(
             showgrid=True,
             gridcolor="white",
             exponentformat="power",
-            title_font=dict(size=20), tickfont=dict(size=20),
+            title_font=dict(size=20), tickfont=dict(size=16),
         )
     else:
-        fig.update_xaxes(title_text=x_label, title_font=dict(size=20), tickfont=dict(size=20))
-    fig.update_yaxes(title_text="Grid score", title_font=dict(size=20), tickfont=dict(size=20))
+        fig.update_xaxes(title_text=x_label, title_font=dict(size=20), tickfont=dict(size=16))
+    fig.update_yaxes(title_text="Grid score", title_font=dict(size=20), tickfont=dict(size=16), range=[-0.5, 2])
     for ann in fig.layout.annotations:
         ann.font.size = 24
-    fig.update_layout(height=500, width=1000)
+    fig.update_layout(height=400, width=1000, margin=dict(l=10, r=10, t=40, b=10))
 
     return fig
 
@@ -1285,7 +1455,7 @@ def sweep_score_distributions_mlflow(
                         n_samples_str = f" K={int(k_val)}"
                     latent_size = OmegaConf.select(cfg, "model.latent_size")
                     if latent_size is not None:
-                        n_neurons_str = f" over {int(latent_size)} neurons,"
+                        n_neurons_str = f" over {int(latent_size)} neurons"
         except Exception as e:
             print(f"Could not load config for run {run.info.run_id}: {e}")
             continue
@@ -1420,7 +1590,7 @@ def sweep_heatmap_2d(
     fig.update_yaxes(title_text=y_label, title_font=dict(size=20), tickfont=dict(size=16))
     for ann in fig.layout.annotations:
         ann.font.size = 24
-    fig.update_layout(height=500, width=1000)
+    fig.update_layout(height=400, width=1000, margin=dict(l=10, r=10, t=40, b=10))
     return fig
 
 
@@ -1597,5 +1767,5 @@ def sweep_n_modules_heatmap_2d(
     ))
     fig.update_xaxes(title_text=x_label, title_font=dict(size=20), tickfont=dict(size=16))
     fig.update_yaxes(title_text=y_label, title_font=dict(size=20), tickfont=dict(size=16))
-    fig.update_layout(title="Mean number of modules", height=500, width=600)
+    fig.update_layout(height=400, width=600, margin=dict(l=10, r=10, t=10, b=10))
     return fig

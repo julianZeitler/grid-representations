@@ -268,14 +268,12 @@ def demo_energy_landscape(
             E_grid[i, j] = energy(np.array([xi, yi]), A, model)
 
     fig, ax = plt.subplots(figsize=(7, 6))
-    im = ax.imshow(E_grid.T, origin="lower", extent=(0, box_w, 0, box_h), cmap="RdBu_r")
+    ax.imshow(E_grid.T, origin="lower", extent=(0, box_w, 0, box_h), cmap="RdBu_r")
     ax.contour(
         x_vals, y_vals, E_grid.T, levels=20, colors="k", linewidths=0.5, alpha=0.4
     )
-    ax.set_title("Energy landscape E(x) = -½ z(x)ᵀ A z(x)")
-    ax.set_xlabel("x₁")
-    ax.set_ylabel("x₂")
-    plt.colorbar(im, ax=ax, label="E(x)")
+    ax.set_xticks([])
+    ax.set_yticks([])
     plt.tight_layout()
     mlflow.log_figure(fig, "energy_landscape.png")
     plt.close()
@@ -412,15 +410,12 @@ def demo_noise(
 
         ax_traj.set_xlim(0, box_w)
         ax_traj.set_ylim(0, box_h)
-        ax_traj.set_ylabel(f"noise={noise}\nx₂")
-        ax_traj.set_xlabel("x₁")
-        ax_energy.set_ylabel(f"noise={noise}\nE(x)")
-        ax_energy.set_xlabel("Step")
-        if row == 0:
-            ax_traj.set_title("Trajectories on energy landscape")
-            ax_energy.set_title("Energy E(x)")
-
-    fig.suptitle(f"Noise robustness (α={alpha})", fontsize=13)
+        ax_traj.set_ylabel(f"noise={noise}\nx₂", fontsize=18)
+        ax_traj.set_xlabel("x₁", fontsize=18)
+        ax_traj.tick_params(labelsize=16)
+        ax_energy.set_ylabel(f"noise={noise}\nE(x)", fontsize=18)
+        ax_energy.set_xlabel("Step", fontsize=18)
+        ax_energy.tick_params(labelsize=16)
     plt.tight_layout()
     mlflow.log_figure(fig, "noise_robustness.png")
     plt.close()
@@ -488,13 +483,12 @@ def demo_trajectories(
             ax.set_ylim(0, box_h)
 
             if row == 0:
-                ax.set_title(f"x₀ = [{x0[0]:.1f}, {x0[1]:.1f}]", fontsize=10)
+                ax.set_title(f"x₀ = ({x0[0]:.1f}, {x0[1]:.1f})", fontsize=18)
             if col == 0:
-                ax.set_ylabel(f"noise={noise}\nx₂", fontsize=9)
+                ax.set_ylabel(f"noise={noise}\nx₂", fontsize=18)
             if row == n_rows - 1:
-                ax.set_xlabel("x₁")
-
-    fig.suptitle(f"Trajectories on energy landscape (α={alpha})", fontsize=12)
+                ax.set_xlabel("x₁", fontsize=18)
+            ax.tick_params(labelsize=16)
     plt.tight_layout()
     mlflow.log_figure(fig, "trajectories.png")
     plt.close()

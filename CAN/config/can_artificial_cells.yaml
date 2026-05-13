@@ -1,0 +1,26 @@
+defaults:
+  - _self_
+
+box_width: 2.0
+box_height: 2.0
+
+# Resolution for building A (n_weight_steps^2 samples)
+n_weight_steps: 40
+# Resolution for energy / Fourier visualisations
+n_vis_steps: 80
+
+# --- Grid cell population ---
+grid:
+  n_cells: 65          # number of cells
+  # Each module entry: spacing lambda (in box units) and orientation (degrees)
+  modules:
+    # - {lam: 0.40, orientation: 0.0,  sigma: 0.07}
+    - {lam: 0.55, orientation: 15.0, sigma: 0.10}
+
+# --- Place cell population ---
+place:
+  n_cells: 65          # number of cells
+  sigma: 0.1          # Gaussian width (box units)
+
+# Random seed (shared for reproducibility)
+seed: 42
