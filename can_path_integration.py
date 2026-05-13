@@ -671,12 +671,10 @@ def demo_combined(
 
         ax.set_xlim(0, box_w)
         ax.set_ylim(0, box_h)
-        ax.set_title(f"α={alpha}")
-        ax.set_xlabel("x₁")
+        ax.set_xticks([])
+        ax.set_yticks([])
 
-    axes[0].set_ylabel("x₂")
-    fig.suptitle(f"Combined CAN ({n_can_steps} inner steps) + path integration", fontsize=13)
-    plt.tight_layout(rect=(0, 0, 1, 0.95))
+    plt.tight_layout()
     mlflow.log_figure(fig, "combined.png")
     plt.close()
 
