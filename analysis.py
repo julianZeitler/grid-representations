@@ -751,8 +751,7 @@ def grid_type(
     ax.grid(True, linestyle='--', linewidth=0.5, alpha=0.5)
     ax.set_xlabel('Grid score (90°)', fontsize=14)
     ax.set_ylabel('Grid score (60°)', fontsize=14)
-    legend_fontsize = max(6, 12 - max(0, n_modules - 10))
-    ax.legend(fontsize=legend_fontsize, bbox_to_anchor=(1.01, 1), loc='upper left', borderaxespad=0, frameon=False)
+    ax.legend(fontsize=12, bbox_to_anchor=(1.01, 1), loc='upper left', borderaxespad=0, frameon=False)
     fig.tight_layout(pad=0)
 
     return fig
