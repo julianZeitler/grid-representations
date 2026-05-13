@@ -14,6 +14,7 @@ dependencies = [
     "numpy>=2.2.0",
     "pandas>=2.3.3",
     "plotly>=6.5.2",
+    "ripser>=0.6.14",
     "scikit-learn>=1.8.0",
     "scipy>=1.15.0",
     "sqlalchemy>=2.0.46",

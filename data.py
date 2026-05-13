@@ -518,14 +518,20 @@ class TrajectoryGenerator:
         ax.set_xlim(-box_width/2 - 0.1, box_width/2 + 0.1)
         ax.set_ylim(-box_height/2 - 0.1, box_height/2 + 0.1)
         ax.set_aspect('equal')
-        ax.legend()
-
-        # Add colorbar
-        cbar = plt.colorbar(lc, ax=ax)
-        cbar.set_label('Time')
+        ax.set_xticks([])
+        ax.set_yticks([])
+        ax.set_frame_on(False)
 
         if title:
-            ax.set_title(title)
+            ax.set_title(title, fontsize=16)
+
+        plt.tight_layout(pad=0.5)
+        fig.canvas.draw()
+        pos = ax.get_position()
+        cax = fig.add_axes([pos.x1 + 0.01, pos.y0, 0.03, pos.height])
+        cbar = plt.colorbar(lc, cax=cax)
+        cbar.set_label('Time', fontsize=16)
+        cbar.ax.tick_params(labelsize=14)
 
         if save_path:
             plt.savefig(save_path, dpi=150, bbox_inches='tight')
