@@ -29,7 +29,7 @@ def make_embedding(N=2048, L=8, omega_MA=48.0, seed=42):
     rng = np.random.default_rng(seed)
     M = N // L
     sigma_omega = np.sqrt(np.pi / 2) * omega_MA
-    omegas_per_block = rng.normal(0, sigma_omega, size=M)
+    omegas_per_block = rng.normal(omega_MA, sigma_omega, size=M)
     omega = np.repeat(omegas_per_block, L)
     theta = rng.uniform(0, 2 * np.pi, size=N)
     thresh = np.cos(np.pi / L)
@@ -112,27 +112,12 @@ def demo_embedding(omega, theta, thresh, omega_MA):
     ps = np.linspace(0, 1, 200)
     xs = encode(ps, omega, theta, thresh)  # (200, N)
 
-    fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+    fig, ax = plt.subplots(1, 1, figsize=(6, 5))
 
-    # (a) Similarity kernel K(Δx)
-    p_ref = 0.5
-    x_ref = encode(np.array([p_ref]), omega, theta, thresh)[0]
-    deltas = np.linspace(-0.15, 0.15, 300)
-    similarities = []
-    for dp in deltas:
-        x_dp = encode(np.array([p_ref + dp]), omega, theta, thresh)[0]
-        sim = (x_ref * x_dp).sum() / (np.linalg.norm(x_ref) * np.linalg.norm(x_dp) + 1e-8)
-        similarities.append(sim)
-    axes[0].plot(deltas, similarities)
-    axes[0].set_xlabel("Δx (m)", fontsize=18)
-    axes[0].set_ylabel("cosine similarity", fontsize=18)
-    axes[0].tick_params(labelsize=16)
-
-    # (b) State matrix (positions × neurons, first 64)
-    axes[1].imshow(xs[:, :64].T, aspect='auto', cmap='viridis', extent=[0, 1, 64, 0])
-    axes[1].set_xlabel("x (m)", fontsize=18)
-    axes[1].set_ylabel("neuron index", fontsize=18)
-    axes[1].tick_params(labelsize=16)
+    ax.imshow(xs[:, :64].T, aspect='auto', cmap='viridis', extent=[0, 1, 64, 0])
+    ax.set_xlabel("x", fontsize=18)
+    ax.set_ylabel("neuron index", fontsize=18)
+    ax.tick_params(labelsize=16)
 
     plt.tight_layout()
     mlflow.log_figure(fig, "embedding.png")
@@ -155,7 +140,7 @@ def demo_energy_landscape(omega, theta, thresh, A):
     axes[1].plot(ps_dense, dE_landscape, linewidth=1, color='tab:orange')
     axes[1].axhline(0, color='gray', linestyle='--', alpha=0.3)
     axes[1].set_ylabel("dE/dp")
-    axes[1].set_xlabel("Position p (m)")
+    axes[1].set_xlabel("Position p")
     axes[1].set_title("Energy gradient (zeros with positive-to-negative crossing = stable minima)")
     plt.tight_layout()
     mlflow.log_figure(fig, "energy_and_gradient.png")
@@ -278,7 +263,7 @@ def demo_trajectories(omega, theta, thresh, A, ps_dense, E_landscape,
         print(f"  noise = {noise} ...")
         for col, p0 in enumerate(start_positions):
             ax = axes[row, col]
-            ax.plot(ps_dense, E_norm, color='steelblue', linewidth=1.2, zorder=1)
+            ax.plot(ps_dense, E_norm, color='steelblue', linewidth=2, zorder=1)
 
             rng = np.random.default_rng(42)
             p = float(p0)
@@ -290,16 +275,17 @@ def demo_trajectories(omega, theta, thresh, A, ps_dense, E_landscape,
 
             p_arr = np.array(trajectory)
             e_arr = np.interp(p_arr, ps_dense, E_norm)
-            ax.scatter(p_arr, e_arr, s=18, color='tomato', alpha=0.3, zorder=2)
-            ax.axvline(x=p0, color='green', linewidth=0.8, linestyle='--', alpha=0.6)
+            colors = plt.cm.YlOrRd(np.linspace(0.3, 1.0, len(p_arr)))
+            ax.scatter(p_arr, e_arr, s=18, color=colors, alpha=0.6, zorder=2)
+            ax.axvline(x=p0, color='green', linewidth=1, linestyle='--', alpha=0.6)
 
             if row == 0:
-                ax.set_title(f"x₀ = {p0:.2f}", fontsize=18)
+                ax.set_title(f"x₀ = {p0:.2f}", fontsize=28)
             if col == 0:
-                ax.set_ylabel(f"noise = {noise}\nE(x) (norm.)", fontsize=18)
+                ax.set_ylabel(f"$\\sigma_n={noise}$\nE(x)", fontsize=28)
             if row == n_rows - 1:
-                ax.set_xlabel("x (m)", fontsize=18)
-            ax.tick_params(labelsize=16)
+                ax.set_xlabel("x", fontsize=28)
+            ax.tick_params(labelsize=20)
     plt.tight_layout()
     mlflow.log_figure(fig, "trajectories.png")
     plt.close()
@@ -323,12 +309,13 @@ def demo_omega_sweep(omega_MAs, alpha, noise_std, n_steps, n_init, n_weight_step
 
         E_land = np.array([energy(p, oA, o, t, th) for p in ps_dense])
         E_norm = (E_land - E_land.mean()) / (E_land.std() + 1e-10)
-        axes[row, 0].plot(E_norm, ps_dense, linewidth=0.8)
+        axes[row, 0].plot(E_norm, ps_dense, linewidth=2)
+        axes[row, 0].margins(x=0.05)
         axes[row, 0].set_ylim(-0.05, 1.05)
-        axes[row, 0].set_ylabel(f"ω_MA={om}\nx (m)", fontsize=18)
-        axes[row, 0].tick_params(labelsize=16)
+        axes[row, 0].set_ylabel(f"$\\omega_{{MA}}={om}$\nx", fontsize=28)
+        axes[row, 0].tick_params(labelsize=20)
         for tick in axes[row, 0].get_yticks():
-            axes[row, 0].axhline(tick, color='gray', linewidth=0.4, alpha=0.5, linestyle=(0, (5, 10)), zorder=0)
+            axes[row, 0].axhline(tick, color='gray', linewidth=1, alpha=0.5, linestyle=(0, (5, 10)), zorder=0)
 
         rng = np.random.default_rng(42)
         for x0 in init_positions:
@@ -338,16 +325,19 @@ def demo_omega_sweep(omega_MAs, alpha, noise_std, n_steps, n_init, n_weight_step
                 x = step_gradient(x, oA, o, t, th, alpha=alpha,
                                   noise_std=noise_std, rng=rng)
                 positions.append(x)
-            axes[row, 1].plot(positions, alpha=0.5, linewidth=0.8)
+            axes[row, 1].plot(positions, alpha=0.5, linewidth=2)
         axes[row, 1].set_ylim(-0.05, 1.05)
-        axes[row, 1].tick_params(labelsize=16)
+        axes[row, 1].tick_params(labelsize=20)
+        if row < len(omega_MAs) - 1:
+            axes[row, 1].tick_params(labelbottom=False)
         for tick in axes[row, 1].get_yticks():
-            axes[row, 1].axhline(tick, color='gray', linewidth=0.4, alpha=0.5, linestyle=(0, (5, 10)), zorder=0)
+            axes[row, 1].axhline(tick, color='gray', linewidth=1, alpha=0.5, linestyle=(0, (5, 10)), zorder=0)
 
-    axes[-1, 0].set_xlabel("E(x) (normalized)", fontsize=18)
-    axes[-1, 1].set_xlabel("Time step", fontsize=18)
+    axes[-1, 0].set_xlabel("E(x)", fontsize=28)
+    axes[-1, 1].set_xlabel("Time step", fontsize=28)
 
     plt.tight_layout()
+    fig.subplots_adjust(left=0.11)
     mlflow.log_figure(fig, "omega_sweep.png")
     plt.close()
 
