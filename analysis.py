@@ -67,8 +67,12 @@ def get_ratemaps(model: nn.Module, res: int, widths: tuple) -> list[np.ndarray]:
     return ratemaps
 
 
-def quantitative_analysis(Vs: list[np.ndarray], widths: tuple, res: int = 70) -> tuple[go.Figure, go.Figure, dict]:
-    """Compute grid scores for ratemaps at different scales.
+def quantitative_analysis(Vs: list[np.ndarray], widths: tuple, res: int = 70) -> tuple[list[go.Figure], dict]:
+    """Compute grid scores and produce one joint distribution plot per spatial scale.
+
+    Each figure: scatter (score_60 vs score_90, colored by module) with top histogram
+    (score_60 projection) and right histogram (score_90 projection). Scatter is square
+    with equal axes.
 
     Args:
         Vs: List of ratemaps [V_small, V_medium, V_large]
@@ -76,46 +80,37 @@ def quantitative_analysis(Vs: list[np.ndarray], widths: tuple, res: int = 70) ->
         res: Resolution of ratemaps
 
     Returns:
-        Tuple of (figure, scores_dict)
+        Tuple of (list of figures [fig_sm, fig_md, fig_lg], scores_dict)
     """
+    import plotly.colors as pc
+
     scores = {}
-    fig_60 = make_subplots(rows=1, cols=3, subplot_titles=["Small Ratemaps", "Medium Ratemaps", "Large Ratemaps"])
-    fig_90 = make_subplots(rows=1, cols=3, subplot_titles=["Small Ratemaps", "Medium Ratemaps", "Large Ratemaps"])
     scale_names = ["sm", "md", "lg"]
-    scale_titles = ["Small Ratemaps", "Medium Ratemaps", "Large Ratemaps"]
+    scale_titles = ["Small", "Medium", "Large"]
+    all_score_60 = []
+    all_score_90 = []
+    all_labels = []
+
+    MODULE_COLORS = pc.qualitative.Plotly
 
     for idx, V in enumerate(Vs):
         maps = [V[i, :] for i in range(V.shape[0])]
-
         starts = [0.2] * 10
         ends = np.linspace(0.4, 1.0, num=10)
         box_width = widths[idx]
-        box_height = widths[idx]
-        coord_range = ((-box_width / 2, box_width / 2), (-box_height / 2, box_height / 2))
-        masks_parameters = zip(starts, ends.tolist())
-        scorer = GridScorer(res, coord_range, masks_parameters)
+        coord_range = ((-box_width / 2, box_width / 2), (-box_width / 2, box_width / 2))
+        scorer = GridScorer(res, coord_range, zip(starts, ends.tolist()))
 
-        score_60, score_90, max_60_mask, max_90_mask, sac, max_60_ind = zip(
-            *[scorer.get_scores(rm.reshape(res, res)) for rm in tqdm(maps, desc=f"Scoring {scale_titles[idx]}")])
+        results = [scorer.get_scores(rm.reshape(res, res)) for rm in tqdm(maps, desc=f"Scoring {scale_titles[idx]}")]
+        score_60, score_90, *_ = zip(*results)
         score_60 = np.nan_to_num(score_60)
         score_90 = np.nan_to_num(score_90)
+        all_score_60.append(score_60)
+        all_score_90.append(score_90)
 
-        axis_suffix = "" if idx == 0 else str(idx + 1)
-
-        for fig, scores_arr, color in [(fig_60, score_60, 'steelblue'), (fig_90, score_90, 'tomato')]:
-            max_s  = np.max(scores_arr)
-            mean_s = np.mean(scores_arr)
-            fig.add_trace(
-                go.Histogram(x=scores_arr, xbins=dict(start=-2, end=2, size=4/15),
-                             name=scale_titles[idx], marker_color=color, showlegend=False),
-                row=1, col=idx + 1,
-            )
-            fig.add_annotation(
-                x=0.05, y=0.95, xref=f"x{axis_suffix} domain", yref=f"y{axis_suffix} domain",
-                text=f"Max: {max_s:.3f}<br>Mean: {mean_s:.3f}",
-                showarrow=False, bgcolor="wheat", opacity=0.8,
-                xanchor="left", yanchor="top", align="left",
-            )
+        sacs = [scorer.calculate_sac(rm.reshape(res, res)) for rm in maps]
+        labels, _ = scorer.get_modules(sacs, max_m=15)
+        all_labels.append(labels)
 
         prefix = scale_names[idx]
         scores[f"{prefix}_60"] = score_60
@@ -124,8 +119,8 @@ def quantitative_analysis(Vs: list[np.ndarray], widths: tuple, res: int = 70) ->
         scores[f"{prefix}_60_mean"] = np.mean(score_60)
         scores[f"{prefix}_90_max"] = np.max(score_90)
         scores[f"{prefix}_90_mean"] = np.mean(score_90)
+        scores[f"{prefix}_labels"] = labels
 
-    # Determine pattern type (60 vs 90 degree) for each neuron by comparing max scores across scales
     scores_60_all = np.stack([scores["sm_60"], scores["md_60"], scores["lg_60"]], axis=0)
     scores_90_all = np.stack([scores["sm_90"], scores["md_90"], scores["lg_90"]], axis=0)
     max_60 = np.max(scores_60_all, axis=0)
@@ -134,13 +129,93 @@ def quantitative_analysis(Vs: list[np.ndarray], widths: tuple, res: int = 70) ->
     scores["count_60"] = np.sum(scores["pattern_type"] == 60)
     scores["count_90"] = np.sum(scores["pattern_type"] == 90)
 
-    for fig in (fig_60, fig_90):
-        fig.update_xaxes(title_text="Grid score", range=[-2, 2], title_font=dict(size=16), tickfont=dict(size=16))
-        fig.update_yaxes(title_text="Count", title_font=dict(size=16), tickfont=dict(size=16))
-        fig.update_layout(height=500, width=1200, showlegend=False)
-        for ann in fig.layout.annotations:
-            ann.font.size = 20
-    return fig_60, fig_90, scores
+    SCORE_RANGE = [-1, 1.5]
+    BIN_SIZE = 4 / 15
+
+    # Per-figure layout: 2 rows × 2 cols, None at (1,2)
+    # Non-None subplot order: (1,1)=1, (2,1)=2, (2,2)=3
+    # top_hist=1 → xaxis; scatter=2 → xaxis2/yaxis2; right_hist=3 → xaxis3/yaxis3
+    specs = [
+        [{"type": "histogram"}, None],
+        [{"type": "scatter"}, {"type": "histogram"}],
+    ]
+
+    figs = []
+    for i in range(3):
+        s60, s90 = all_score_60[i], all_score_90[i]
+        labels = all_labels[i]
+        n_modules = int(labels.max()) + 1
+
+        fig = make_subplots(
+            rows=2, cols=2,
+            specs=specs,
+            column_widths=[3, 1],
+            row_heights=[1, 3],
+            horizontal_spacing=0.03,
+            vertical_spacing=0.04,
+        )
+
+        # scatter colored by module
+        for m in range(n_modules):
+            mask = labels == m
+            color = MODULE_COLORS[m % len(MODULE_COLORS)]
+            fig.add_trace(
+                go.Scatter(x=s60[mask], y=s90[mask], mode='markers',
+                           marker=dict(size=8, color=color, opacity=0.6),
+                           name=f"{m}", showlegend=True),
+                row=2, col=1,
+            )
+
+        # top histogram (score_60, single)
+        fig.add_trace(
+            go.Histogram(x=s60, xbins=dict(start=SCORE_RANGE[0], end=SCORE_RANGE[1], size=BIN_SIZE),
+                         marker_color='steelblue', showlegend=False),
+            row=1, col=1,
+        )
+
+        # right histogram (score_90, horizontal, single)
+        fig.add_trace(
+            go.Histogram(y=s90, ybins=dict(start=SCORE_RANGE[0], end=SCORE_RANGE[1], size=BIN_SIZE),
+                         marker_color='steelblue', showlegend=False, orientation='h'),
+            row=2, col=2,
+        )
+
+        # link axes: top-hist x → scatter x; right-hist y → scatter y
+        fig.layout.xaxis.matches = 'x2'
+        fig.layout.yaxis3.matches = 'y2'
+
+        # diagonal x=y line
+        fig.add_trace(
+            go.Scatter(x=SCORE_RANGE, y=SCORE_RANGE, mode='lines',
+                       line=dict(color='gray', dash='dash', width=1),
+                       showlegend=False),
+            row=2, col=1,
+        )
+
+        ticks = [-1, -0.5, 0, 0.5, 1.0, 1.5]
+        fig.update_xaxes(range=SCORE_RANGE, tickvals=ticks, title_text="60° score",
+                         title_font=dict(size=24), tickfont=dict(size=20), row=2, col=1)
+        fig.update_yaxes(range=SCORE_RANGE, tickvals=ticks, title_text="90° score",
+                         title_font=dict(size=24), tickfont=dict(size=20),
+                         scaleanchor='x2', scaleratio=1, row=2, col=1)
+        fig.update_xaxes(showticklabels=False, row=1, col=1)
+        fig.update_yaxes(showticklabels=False, row=2, col=2)
+        # count axis tick fonts on histograms
+        fig.update_yaxes(tickfont=dict(size=20), row=1, col=1)
+        fig.update_xaxes(tickfont=dict(size=20), row=2, col=2)
+
+        # row_heights=[1,3], spacing=0.04 → scatter top ≈ 0.72 in paper coords
+        fig.update_layout(
+            height=600, width=650,
+            barmode='overlay',
+            legend=dict(x=0.02, y=0.70, xanchor='left', yanchor='top',
+                        font=dict(size=20), bgcolor='rgba(255,255,255,0.7)'),
+            margin=dict(l=10, r=10, t=10, b=10),
+        )
+
+        figs.append(fig)
+
+    return figs, scores
 
 def manifold_cloud(
     embedding: NDArray[np.floating],
@@ -343,7 +418,6 @@ def manifold(
 
 def loss_plots(
     train_losses: dict[str, np.ndarray],
-    val_losses: Optional[dict[str, np.ndarray]] = None,
     lambda_pos: Optional[np.ndarray] = None,
     lambda_norm: Optional[np.ndarray] = None,
 ) -> go.Figure:
@@ -351,23 +425,19 @@ def loss_plots(
 
     Args:
         train_losses: Dict with keys 'loss', 'separation', 'positivity', 'norm'
-        val_losses: Optional dict with same keys for validation losses
         lambda_pos: Optional array of lambda_pos values over iterations
         lambda_norm: Optional array of lambda_norm values over iterations
     """
     keys = ['loss', 'separation', 'positivity', 'norm']
     titles = ['Loss', 'Separation', 'Positivity', 'Norm']
 
-    # Determine which subplots need secondary y-axis (2x2 grid)
-    specs = [[], []]
-    for i, key in enumerate(keys):
+    specs = [[]]
+    for key in keys:
         has_secondary = (key == 'positivity' and lambda_pos is not None) or (key == 'norm' and lambda_norm is not None)
-        specs[i // 2].append({"secondary_y": has_secondary})
+        specs[0].append({"secondary_y": has_secondary})
 
-    fig = make_subplots(rows=2, cols=2, subplot_titles=titles, specs=specs,
-                        horizontal_spacing=0.12, vertical_spacing=0.16)
-
-    n_train = len(train_losses.get('loss', []))
+    fig = make_subplots(rows=1, cols=4, subplot_titles=titles, specs=specs,
+                        horizontal_spacing=0.05)
 
     for counter, key in enumerate(keys):
         if key not in train_losses:
@@ -375,73 +445,50 @@ def loss_plots(
 
         train_data = train_losses[key]
         x_train = list(range(len(train_data)))
-
-        show_in_legend = counter == 0 and val_losses is not None and key in val_losses
-
-        row = counter // 2 + 1
-        col = counter % 2 + 1
+        col = counter + 1
 
         fig.add_trace(
             go.Scatter(x=x_train, y=train_data, mode='lines', name='Train',
-                       line=dict(color='blue'), showlegend=show_in_legend),
-            row=row, col=col
+                       line=dict(color='blue'), showlegend=False),
+            row=1, col=col
         )
-
-        if val_losses is not None and key in val_losses:
-            val_data = val_losses[key]
-            n_val = len(val_data)
-            val_x = np.linspace(0, n_train - 1, n_val).tolist()
-            fig.add_trace(
-                go.Scatter(x=val_x, y=val_data, mode='lines', name='Validation',
-                           line=dict(color='green', dash='dash'), opacity=0.8,
-                           showlegend=show_in_legend),
-                row=row, col=col
-            )
 
         if key == 'positivity' and lambda_pos is not None:
             fig.add_trace(
                 go.Scatter(x=list(range(len(lambda_pos))), y=lambda_pos, mode='lines',
                            name='λ<sub>pos</sub>', line=dict(color='red', dash='dash'),
                            opacity=0.8, showlegend=False),
-                row=row, col=col, secondary_y=True
+                row=1, col=col, secondary_y=True
             )
-            fig.update_yaxes(title_text="λ<sub>pos</sub>", secondary_y=True, row=row, col=col,
-                             tickfont=dict(color='red'), title_font=dict(color='red'), title_standoff=5)
+            fig.update_yaxes(title_text="λ<sub>pos</sub>", secondary_y=True, row=1, col=col,
+                             tickfont=dict(color='red', size=20), title_font=dict(color='red', size=20), title_standoff=5)
 
         elif key == 'norm' and lambda_norm is not None:
             fig.add_trace(
                 go.Scatter(x=list(range(len(lambda_norm))), y=lambda_norm, mode='lines',
                            name='λ<sub>norm</sub>', line=dict(color='red', dash='dash'),
                            opacity=0.8, showlegend=False),
-                row=row, col=col, secondary_y=True
+                row=1, col=col, secondary_y=True
             )
-            fig.update_yaxes(title_text="λ<sub>norm</sub>", secondary_y=True, row=row, col=col,
-                             tickfont=dict(color='red'), title_font=dict(color='red'), title_standoff=5)
+            fig.update_yaxes(title_text="λ<sub>norm</sub>", secondary_y=True, row=1, col=col,
+                             tickfont=dict(color='red', size=20), title_font=dict(color='red', size=20), title_standoff=5)
 
-    fig.update_xaxes(title_text="Epoch", title_standoff=5)
+    fig.update_xaxes(title_text="Epoch", title_standoff=5, title_font=dict(size=20), tickfont=dict(size=20))
     y_titles = {
         'Loss': 'Loss',
         'Separation': 'Separation',
-        'Positivity': 'Positivity = log(L<sub>2</sub>) - k<sub>pos</sub>',
-        'Norm': 'Norm = log(L<sub>3</sub>) - k<sub>norm</sub>',
+        'Positivity': 'Positivity',
+        'Norm': 'Norm',
     }
     for counter, title in enumerate(titles):
-        row = counter // 2 + 1
-        col = counter % 2 + 1
-        fig.update_yaxes(title_text=y_titles[title], row=row, col=col, secondary_y=False,
-                         tickfont=dict(color='blue'), title_font=dict(color='blue'))
+        col = counter + 1
+        fig.update_yaxes(row=1, col=col, secondary_y=False,
+                         tickfont=dict(color='blue', size=20))
 
-    fig.update_layout(
-        height=600, width=1000,
-        legend=dict(
-            x=0.4, y=0.99,
-            xanchor='right', yanchor='top',
-            bgcolor='rgba(255,255,255,0.7)',
-        )
-    )
+    fig.update_layout(height=250, width=1400, showlegend=False, margin=dict(l=10, r=10, t=40, b=10))
 
     for ann in fig.layout.annotations:
-        ann.font.size = 16
+        ann.font.size = 22
 
     return fig
 
@@ -486,7 +533,8 @@ def neuron_plotter_2d(
         fig.update_xaxes(showticklabels=False, showgrid=False, constrain='domain', row=row, col=col)
         fig.update_yaxes(showticklabels=False, showgrid=False, scaleanchor=f'x{axis_suffix}',
                          scaleratio=1, constrain='domain', row=row, col=col)
-    fig.update_layout(height=800, width=800)
+    t_margin = 40 if scores is not None else 10
+    fig.update_layout(height=800, width=800, margin=dict(l=10, r=10, t=t_margin, b=10))
     return fig
 
 
@@ -622,9 +670,6 @@ def create_loss_plots_from_mlflow(k: int) -> None:
         "positivity": f"k{k}/positivity_geco",
         "norm": f"k{k}/norm_geco",
     }
-    val_metrics = {
-        "loss": f"k{k}/val_loss",
-    }
     lambda_metrics = {
         "lambda_pos": f"k{k}/lambda_pos",
         "lambda_norm": f"k{k}/lambda_norm",
@@ -647,22 +692,10 @@ def create_loss_plots_from_mlflow(k: int) -> None:
     if not train_losses:
         return
 
-    # Build val losses dict (only include metrics that exist)
-    val_losses = {}
-    for key, metric_name in val_metrics.items():
-        data = fetch_metric(metric_name)
-        if data is not None:
-            val_losses[key] = data
-
-    # Fetch lambda values
-    lambda_pos = fetch_metric(lambda_metrics["lambda_pos"])
-    lambda_norm = fetch_metric(lambda_metrics["lambda_norm"])
-
     fig = loss_plots(
         train_losses,
-        val_losses=val_losses if val_losses else None,
-        lambda_pos=lambda_pos,
-        lambda_norm=lambda_norm,
+        lambda_pos=fetch_metric(lambda_metrics["lambda_pos"]),
+        lambda_norm=fetch_metric(lambda_metrics["lambda_norm"]),
     )
     log_figure(fig, f"loss_curves_k{k}")
 
@@ -926,9 +959,9 @@ def generate_2d_plots(model: nn.Module, k: int = 0, generate_manifold = False) -
     Vs = get_ratemaps(model, res, widths)
     V_small, V_medium, V_large = Vs
 
-    fig_scores_60, fig_scores_90, scores = quantitative_analysis(Vs, widths, res)
-    log_figure(fig_scores_60, f"grid_scores_60_k{k}")
-    log_figure(fig_scores_90, f"grid_scores_90_k{k}")
+    figs_scores, scores = quantitative_analysis(Vs, widths, res)
+    for scale_name, fig_scores in zip(["sm", "md", "lg"], figs_scores):
+        log_figure(fig_scores, f"grid_scores_{scale_name}_k{k}")
 
     # Log scalar scores as metrics
     for key, value in scores.items():
@@ -1160,7 +1193,8 @@ def sweep_boxplot(
         subplot_titles=[
             f"Mean ({n_neurons_str.strip()})",
             f"Max ({n_neurons_str.strip()})",
-        ]
+        ],
+        horizontal_spacing=0.04,
     )
 
     for col, key in enumerate([mean_key, max_key], start=1):
@@ -1174,7 +1208,7 @@ def sweep_boxplot(
                     showlegend=False,
                     marker_color="black",
                     fillcolor="white",
-                    line=dict(color="black", width=1),
+                    line=dict(color="black", width=1.5),
                     boxpoints="outliers",
                 ),
                 row=1, col=col
@@ -1194,10 +1228,12 @@ def sweep_boxplot(
         )
     else:
         fig.update_xaxes(title_text=x_label, title_font=dict(size=20), tickfont=dict(size=16))
-    fig.update_yaxes(title_text="Grid score", title_font=dict(size=20), tickfont=dict(size=16), range=[-0.5, 2])
+    fig.update_xaxes(title_font=dict(size=24), tickfont=dict(size=20), title_standoff=5)
+    fig.update_yaxes(title_text="Grid score", title_font=dict(size=24), tickfont=dict(size=20), range=[-0.2, 1.6], title_standoff=5)
+    fig.update_yaxes(showticklabels=False, title_text="", row=1, col=2)
     for ann in fig.layout.annotations:
-        ann.font.size = 24
-    fig.update_layout(height=400, width=1000, margin=dict(l=10, r=10, t=40, b=10))
+        ann.font.size = 26
+    fig.update_layout(height=300, width=700, margin=dict(l=10, r=10, t=40, b=10))
 
     return fig
 
@@ -1237,7 +1273,8 @@ def sweep_violin_plot(
         subplot_titles=[
             f"Mean ({n_neurons_str.strip()})",
             f"Max ({n_neurons_str.strip()})",
-        ]
+        ],
+        horizontal_spacing=0.04,
     )
 
     for col, key in enumerate([mean_key, max_key], start=1):
@@ -1271,10 +1308,12 @@ def sweep_violin_plot(
         )
     else:
         fig.update_xaxes(title_text=x_label, title_font=dict(size=20), tickfont=dict(size=16))
-    fig.update_yaxes(title_text="Grid score", title_font=dict(size=20), tickfont=dict(size=16), range=[-0.5, 2])
+    fig.update_xaxes(title_font=dict(size=24), tickfont=dict(size=20), title_standoff=5)
+    fig.update_yaxes(title_text="Grid score", title_font=dict(size=24), tickfont=dict(size=20), range=[-0.2, 1.6], title_standoff=5)
+    fig.update_yaxes(showticklabels=False, title_text="", row=1, col=2)
     for ann in fig.layout.annotations:
-        ann.font.size = 24
-    fig.update_layout(height=400, width=1000, margin=dict(l=10, r=10, t=40, b=10))
+        ann.font.size = 26
+    fig.update_layout(height=300, width=700, margin=dict(l=10, r=10, t=40, b=10))
 
     return fig
 
@@ -1314,7 +1353,8 @@ def sweep_iqr_plot(
         subplot_titles=[
             f"Mean ({n_neurons_str.strip()})",
             f"Max ({n_neurons_str.strip()})",
-        ]
+        ],
+        horizontal_spacing=0.04,
     )
 
     for col, key in enumerate([mean_key, max_key], start=1):
@@ -1364,10 +1404,12 @@ def sweep_iqr_plot(
         )
     else:
         fig.update_xaxes(title_text=x_label, title_font=dict(size=20), tickfont=dict(size=16))
-    fig.update_yaxes(title_text="Grid score", title_font=dict(size=20), tickfont=dict(size=16), range=[-0.5, 2])
+    fig.update_xaxes(title_font=dict(size=24), tickfont=dict(size=20), title_standoff=5)
+    fig.update_yaxes(title_text="Grid score", title_font=dict(size=24), tickfont=dict(size=20), range=[-0.2, 1.6], title_standoff=5)
+    fig.update_yaxes(showticklabels=False, title_text="", row=1, col=2)
     for ann in fig.layout.annotations:
-        ann.font.size = 24
-    fig.update_layout(height=400, width=1000, margin=dict(l=10, r=10, t=40, b=10))
+        ann.font.size = 26
+    fig.update_layout(height=320, width=850, margin=dict(l=10, r=10, t=40, b=10))
 
     return fig
 

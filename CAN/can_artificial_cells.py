@@ -215,6 +215,26 @@ def fourier_power(
     return fx, fy, power
 
 
+def compute_coverage(
+    z_fn: callable,
+    n_vis: int,
+    box_width: float,
+    box_height: float,
+) -> np.ndarray:
+    """
+    Evaluate sum of all cell firing rates on a grid.
+
+    Returns coverage map of shape [n_vis, n_vis].
+    """
+    x_vals = np.linspace(0, box_width, n_vis)
+    y_vals = np.linspace(0, box_height, n_vis)
+    coverage = np.zeros((n_vis, n_vis))
+    for i, xi in enumerate(x_vals):
+        for j, yi in enumerate(y_vals):
+            coverage[i, j] = z_fn(np.array([xi, yi])).sum()
+    return coverage
+
+
 def compute_rate_maps(
     z_fn: callable,
     n_vis: int,
@@ -276,8 +296,8 @@ def plot_energy_and_fourier(
     extent_f = (fx.min(), fx.max(), fy.min(), fy.max())
     vlim = np.abs(power).max()
     im2 = ax.imshow(power.T, origin="lower", extent=extent_f, cmap="RdBu_r", vmin=-vlim, vmax=vlim)
-    ax.set_xlabel("spatial frequency f₁ (1/unit)", fontsize=12, labelpad=2)
-    ax.set_ylabel("spatial frequency f₂ (1/unit)", fontsize=12, labelpad=2)
+    ax.set_xlabel("spatial frequency f₁ (1/unit)", fontsize=20, labelpad=2)
+    ax.set_ylabel("spatial frequency f₂ (1/unit)", fontsize=20, labelpad=2)
     plt.colorbar(im2, ax=ax, label="")
     ax.axhline(0, color="w", linewidth=0.4, alpha=0.5)
     ax.axvline(0, color="w", linewidth=0.4, alpha=0.5)
@@ -297,37 +317,38 @@ def plot_comparison(
     power_place: np.ndarray,
     rate_maps_grid: list[np.ndarray],
     rate_maps_place: list[np.ndarray],
+    coverage_grid: np.ndarray,
+    coverage_place: np.ndarray,
     box_width: float,
     box_height: float,
 ) -> plt.Figure:
     """
-    2×3 comparison figure.
+    2×4 comparison figure.
 
-    Columns: [2×2 rate maps] | [energy landscape] | [2-D Fourier spectrum]
+    Columns: [2×2 rate maps] | [coverage] | [energy landscape] | (spacer) | [2-D Fourier spectrum]
     Rows:    grid cells      | place cells
     """
     from matplotlib.gridspec import GridSpec, GridSpecFromSubplotSpec
 
-    fig = plt.figure(figsize=(15, 9))
-    gs = GridSpec(2, 3, figure=fig, hspace=0.18, wspace=0.15,
-                  left=0.04, right=0.96, top=0.98, bottom=0.08,
-                  width_ratios=[0.84, 1, 1])
+    # 5-col GridSpec with col 3 as a spacer to add extra gap before frequency plot
+    fig = plt.figure(figsize=(19, 9))
+    gs = GridSpec(2, 5, figure=fig, hspace=0.18, wspace=0.15,
+                  left=0.04, right=0.96, top=0.94, bottom=0.08,
+                  width_ratios=[0.91, 1, 1, 0.08, 1])
 
     rows = [
-        ("Grid cells",  E_grid_grid,  power_grid,  rate_maps_grid),
-        ("Place cells", E_grid_place, power_place, rate_maps_place),
+        ("Grid cells",  E_grid_grid,  power_grid,  rate_maps_grid,  coverage_grid),
+        ("Place cells", E_grid_place, power_place, rate_maps_place, coverage_place),
     ]
 
-    for row_idx, (label, E_grid, power, rate_maps) in enumerate(rows):
+    for row_idx, (label, E_grid, power, rate_maps, coverage) in enumerate(rows):
 
         # --- Col 0: 2×2 rate map mini-grid ---
         gs_inner = GridSpecFromSubplotSpec(
             2, 2, subplot_spec=gs[row_idx, 0], hspace=0.0, wspace=0.0
         )
-        axes_inner: list[plt.Axes] = []
         for k, rmap in enumerate(rate_maps):
             ax = fig.add_subplot(gs_inner[k // 2, k % 2])
-            axes_inner.append(ax)
             ax.imshow(rmap.T, origin="lower", cmap="viridis", aspect="auto")
             ax.set_xticks([])
             ax.set_yticks([])
@@ -335,30 +356,47 @@ def plot_comparison(
                 spine.set_edgecolor("white")
                 spine.set_linewidth(1.5)
 
-        # --- Col 1: Energy landscape ---
-        ax_e = fig.add_subplot(gs[row_idx, 1])
-        im = ax_e.imshow(
-            E_grid.T, origin="lower",
+        # --- Col 1: Coverage map ---
+        ax_c = fig.add_subplot(gs[row_idx, 1])
+        im_c = ax_c.imshow(
+            coverage.T, origin="lower",
             extent=(0, box_width, 0, box_height),
-            cmap="RdBu_r",
+            cmap="viridis",
         )
-        ax_e.contour(
-            x_vals, y_vals, E_grid.T, levels=20,
-            colors="k", linewidths=0.4, alpha=0.35,
+        plt.colorbar(im_c, ax=ax_c, fraction=0.046, pad=0.04).ax.tick_params(labelsize=18)
+        ax_c.set_xticks([])
+        ax_c.set_yticks([])
+        if row_idx == 0:
+            ax_c.set_title("Coverage", fontsize=20)
+
+        # --- Col 2: Energy landscape ---
+        ax_e = fig.add_subplot(gs[row_idx, 2])
+        E_z = (E_grid - E_grid.mean()) / E_grid.std()
+        im = ax_e.imshow(
+            E_z.T, origin="lower",
+            extent=(0, box_width, 0, box_height),
+            cmap="viridis",
         )
+        plt.colorbar(im, ax=ax_e, fraction=0.046, pad=0.04).ax.tick_params(labelsize=18)
         ax_e.set_xticks([])
         ax_e.set_yticks([])
+        if row_idx == 0:
+            ax_e.set_title("Energy landscape", fontsize=20)
 
-        # --- Col 2: 2-D Fourier spectrum ---
-        ax_f = fig.add_subplot(gs[row_idx, 2])
+        # --- Col 4: 2-D Fourier spectrum (col 3 is spacer) ---
+        ax_f = fig.add_subplot(gs[row_idx, 4])
         extent_f = (fx.min(), fx.max(), fy.min(), fy.max())
         vlim = np.abs(power).max()
         im2 = ax_f.imshow(power.T, origin="lower", extent=extent_f, cmap="RdBu_r", vmin=-vlim, vmax=vlim)
         ax_f.axhline(0, color="w", linewidth=0.4, alpha=0.5)
         ax_f.axvline(0, color="w", linewidth=0.4, alpha=0.5)
-        plt.colorbar(im2, ax=ax_f, label="", fraction=0.046, pad=0.04)
-        ax_f.set_xlabel("spatial frequency f₁ (1/unit)", fontsize=12, labelpad=2)
-        ax_f.set_ylabel("spatial frequency f₂ (1/unit)", fontsize=12, labelpad=2)
+        cb = plt.colorbar(im2, ax=ax_f, fraction=0.046, pad=0.04)
+        cb.ax.tick_params(labelsize=18)
+        ax_f.tick_params(labelsize=18)
+        ax_f.set_xlabel("f₁", fontsize=20, labelpad=2)
+        ax_f.set_ylabel("f₂", fontsize=20, labelpad=-15)
+        if row_idx == 0:
+            ax_f.set_title("Power spectrum", fontsize=20)
 
     return fig
 
@@ -428,6 +466,11 @@ def main(cfg: DictConfig) -> None:
     rm_grid = compute_rate_maps(gz_fn, n_vis, box_w, box_h, _pick_indices(D_grid))
     rm_place = compute_rate_maps(pz_fn, n_vis, box_w, box_h, _pick_indices(D_place))
 
+    # ---- Coverage maps ----
+    print("Computing coverage maps ...")
+    cov_grid = compute_coverage(gz_fn, n_vis, box_w, box_h)
+    cov_place = compute_coverage(pz_fn, n_vis, box_w, box_h)
+
     # ---- Log to MLflow ----
     with mlflow.start_run():
         mlflow.log_text(OmegaConf.to_yaml(cfg, resolve=True), "config.yaml")
@@ -460,6 +503,7 @@ def main(cfg: DictConfig) -> None:
             E_grid_g, E_grid_p,
             fx_g, fy_g, pow_g, pow_p,
             rm_grid, rm_place,
+            cov_grid, cov_place,
             box_w, box_h,
         )
         mlflow.log_figure(fig_cmp, "comparison.png")
