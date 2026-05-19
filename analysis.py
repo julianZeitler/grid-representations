@@ -155,14 +155,15 @@ def quantitative_analysis(Vs: list[np.ndarray], widths: tuple, res: int = 70) ->
             vertical_spacing=0.04,
         )
 
-        # scatter colored by module
+        # scatter colored by module; split into two legend columns if > 10 modules
         for m in range(n_modules):
             mask = labels == m
             color = MODULE_COLORS[m % len(MODULE_COLORS)]
+            leg = 'legend2' if n_modules > 10 and m >= 10 else 'legend'
             fig.add_trace(
                 go.Scatter(x=s60[mask], y=s90[mask], mode='markers',
                            marker=dict(size=8, color=color, opacity=0.6),
-                           name=f"{m}", showlegend=True),
+                           name=f"{m}", showlegend=True, legend=leg),
                 row=2, col=1,
             )
 
@@ -205,12 +206,17 @@ def quantitative_analysis(Vs: list[np.ndarray], widths: tuple, res: int = 70) ->
         fig.update_xaxes(tickfont=dict(size=20), row=2, col=2)
 
         # row_heights=[1,3], spacing=0.04 → scatter top ≈ 0.72 in paper coords
+        _leg_base = dict(x=0.02, y=0.70, xanchor='left', yanchor='top',
+                         font=dict(size=20), bgcolor='rgba(255,255,255,0.7)')
+        layout_extra = {}
+        if n_modules > 10:
+            layout_extra['legend2'] = {**_leg_base, 'x': 0.12}
         fig.update_layout(
             height=600, width=650,
             barmode='overlay',
-            legend=dict(x=0.02, y=0.70, xanchor='left', yanchor='top',
-                        font=dict(size=20), bgcolor='rgba(255,255,255,0.7)'),
+            legend=_leg_base,
             margin=dict(l=10, r=10, t=10, b=10),
+            **layout_extra,
         )
 
         figs.append(fig)
