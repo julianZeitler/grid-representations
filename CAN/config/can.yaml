@@ -2,8 +2,8 @@ defaults:
   - _self_
 
 can:
-  N: 4096
-  L: 8
+  N: 65
+  L: 5
   wta: block           # "block" for block_wta (uses L), "global" for global kWTA
   k: null              # number of winners for global kWTA; defaults to N//L if null
   zero_within_block: true

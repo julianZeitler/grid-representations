@@ -1,8 +1,8 @@
 defaults:
   - _self_
 
-N: 2048
-L: 8
+N: 65
+L: 5
 omega_MA: 48.0
 n_weight_steps: 300
 
@@ -19,10 +19,10 @@ noise:
 
 trajectories:
   omega_MA: 8.0
-  start_positions: [0.1, 0.3, 0.5, 0.7, 0.9]
+  start_positions: [0.1, 0.25, 0.5, 0.75, 1]
   noise_levels: [0.0, 0.001, 0.01, 0.1]
   alpha: 0.01
-  n_steps: 50
+  n_steps: 100
 
 omega_sweep:
   omega_MAs: [8, 32, 128]

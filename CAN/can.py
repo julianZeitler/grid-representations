@@ -237,56 +237,23 @@ def add_synaptic_noise(W: torch.Tensor, noise_scale: float = 1.0) -> torch.Tenso
 # ============================================================================
 
 def demo_embedding(emb: SpatialEmbedding):
-    """Demonstrate the spatial embedding and similarity kernel."""
+    """Demonstrate the spatial embedding."""
     print("=" * 60)
-    print("DEMO 1: Spatial Embedding and Similarity Kernel")
+    print("DEMO 1: Spatial Embedding")
     print("=" * 60)
 
-    N, L, omega_MA = emb.N, emb.L, emb.omega_MA
-
-    # Show embedding for a few positions
     ps = torch.linspace(0, 1, 200)
     xs = emb.encode(ps)  # (200, N)
 
-    fig, axes = plt.subplots(1, 3, figsize=(18, 5))
+    fig, ax = plt.subplots(1, 1, figsize=(6, 5))
 
-    # (a) Similarity kernel K(Δp)
-    ax = axes[0]
-    p_ref = torch.tensor(0.5)
-    x_ref = emb.encode(p_ref)  # (N,)
-    deltas = torch.linspace(-0.15, 0.15, 300)
-    similarities = []
-    for dp in deltas:
-        x_dp = emb.encode(p_ref + dp)
-        sim = (x_ref * x_dp).sum() / (N / L)
-        similarities.append(sim.item())
-    ax.plot(deltas.numpy(), similarities)
-    ax.set_xlabel("Δp (m)")
-    ax.set_ylabel("Normalized similarity K(Δp)")
-    ax.set_title(f"Similarity kernel (ω_MA={omega_MA})")
-    ax.axhline(y=1/L, color='r', linestyle='--', alpha=0.5, label='1/L baseline')
-    ax.legend()
-
-    # (b) Full state matrix (positions × neurons)
-    ax = axes[1]
-    ax.imshow(xs[:, :64].numpy().T, aspect='auto', cmap='binary',
-              extent=[0, 1, 64, 0])
-    ax.set_xlabel("Position p (m)")
-    ax.set_ylabel("Neuron index (first 64)")
-    ax.set_title("Binary state vectors x(p)")
-
-    # (c) Sparsity verification
-    ax = axes[2]
-    sparsities = xs.mean(dim=1)
-    ax.plot(ps.numpy(), sparsities.numpy())
-    ax.axhline(y=1/L, color='r', linestyle='--', label=f'Expected 1/L = {1/L:.3f}')
-    ax.set_xlabel("Position p (m)")
-    ax.set_ylabel("Fraction of active neurons")
-    ax.set_title("Sparsity verification")
-    ax.legend()
+    ax.imshow(xs[:, :64].numpy().T, aspect='auto', cmap='binary', extent=[0, 1, 64, 0])
+    ax.set_xlabel("x", fontsize=18)
+    ax.set_ylabel("neuron index", fontsize=18)
+    ax.tick_params(labelsize=16)
 
     plt.tight_layout()
-    mlflow.log_figure(fig, "demo_embedding.png")
+    mlflow.log_figure(fig, "embedding.png")
     plt.close()
 
 
